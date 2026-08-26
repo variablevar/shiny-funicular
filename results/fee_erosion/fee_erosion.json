@@ -1,0 +1,29 @@
+[
+  {
+    "identifier": "gtquant-v0.1-5m-primary",
+    "strategy": "GTQuantMultiTF",
+    "n_trades": 473,
+    "total_fees": 38.9,
+    "net_pnl": -21.4,
+    "gross_pnl": 17.5,
+    "fee_erosion_pct": 222.3
+  },
+  {
+    "identifier": "gtquant-v0.1-15m-target",
+    "strategy": "GTQuantMultiTF15m",
+    "n_trades": 1990,
+    "total_fees": 170.86,
+    "net_pnl": -176.03,
+    "gross_pnl": -5.18,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-v0.1-1h-target",
+    "strategy": "GTQuantMultiTF1h",
+    "n_trades": 1591,
+    "total_fees": 135.83,
+    "net_pnl": -122.07,
+    "gross_pnl": 13.76,
+    "fee_erosion_pct": 987.2
+  }
+]

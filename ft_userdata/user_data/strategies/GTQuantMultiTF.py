@@ -21,7 +21,7 @@ import talib.abstract as ta
 from pandas import DataFrame
 
 from technical import qtpylib
-from freqtrade.strategy import IStrategy, informative
+from freqtrade.strategy import DecimalParameter, IStrategy, informative
 
 
 class GTQuantMultiTF(IStrategy):
@@ -40,10 +40,11 @@ class GTQuantMultiTF(IStrategy):
 
     can_short = True
 
-    # Entry/exit thresholds on the model's predicted return.
-    # (plain attributes for now; Hyperopt converts them on Day 4)
-    entry_threshold = 0.0002   # predicted forward return
-    exit_threshold = -0.0005
+    # Entry/exit thresholds on the model's predicted return (hyperopt-tuned).
+    entry_threshold = DecimalParameter(0.0001, 0.005, default=0.0005, decimals=6,
+                                       space="buy", optimize=True, load=True)
+    exit_threshold = DecimalParameter(-0.005, -0.0001, default=-0.0005, decimals=6,
+                                      space="sell", optimize=True, load=True)
 
     # FreqAI prediction column this strategy trades on. Secondary
     # identifiers (15m/1h) override this + set_freqai_targets.
@@ -155,13 +156,13 @@ class GTQuantMultiTF(IStrategy):
 
         long_cond = [
             dataframe["do_predict"] == 1,
-            dataframe[prediction] > self.entry_threshold,
+            dataframe[prediction] > self.entry_threshold.value,
             dataframe["ema_50_slope_1h"] > 0,       # 1h trend up
             dataframe["volume_zscore"] > -1.0,      # avoid dead bars
         ]
         short_cond = [
             dataframe["do_predict"] == 1,
-            dataframe[prediction] < -self.entry_threshold,
+            dataframe[prediction] < -self.entry_threshold.value,
             dataframe["ema_50_slope_1h"] < 0,       # 1h trend down
             dataframe["volume_zscore"] > -1.0,
         ]
@@ -177,11 +178,11 @@ class GTQuantMultiTF(IStrategy):
             return dataframe
 
         dataframe.loc[
-            (dataframe["do_predict"] == 1) & (dataframe[prediction] < self.exit_threshold),
+            (dataframe["do_predict"] == 1) & (dataframe[prediction] < self.exit_threshold.value),
             ["exit_long", "exit_tag"],
         ] = (1, "model_flip_down")
         dataframe.loc[
-            (dataframe["do_predict"] == 1) & (dataframe[prediction] > -self.exit_threshold),
+            (dataframe["do_predict"] == 1) & (dataframe[prediction] > -self.exit_threshold.value),
             ["exit_short", "exit_tag"],
         ] = (1, "model_flip_up")
         return dataframe
