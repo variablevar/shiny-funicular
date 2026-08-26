@@ -40,10 +40,14 @@ class GTQuantMultiTF(IStrategy):
 
     can_short = True
 
-    # Entry/exit thresholds on the model's predicted 5m return.
+    # Entry/exit thresholds on the model's predicted return.
     # (plain attributes for now; Hyperopt converts them on Day 4)
-    entry_threshold = 0.0002   # +0.02% predicted 5m return
-    exit_threshold = -0.0005  # -0.05% predicted 5m return
+    entry_threshold = 0.0002   # predicted forward return
+    exit_threshold = -0.0005
+
+    # FreqAI prediction column this strategy trades on. Secondary
+    # identifiers (15m/1h) override this + set_freqai_targets.
+    prediction_col = "&-s-future_return_5m"
 
     # ------------------------------------------------------------------ #
     # Informative timeframes for strategy logic
@@ -143,10 +147,9 @@ class GTQuantMultiTF(IStrategy):
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Enter when FreqAI is confident (do_predict == 1) and the predicted
-        5m return clears the threshold. 1h trend gates shorts/longs.
+        return clears the threshold. 1h trend gates shorts/longs.
         """
-        # FreqAI populates "&-s-future_return_5m" (prediction) and "do_predict".
-        prediction = "&-s-future_return_5m"
+        prediction = self.prediction_col
         if prediction not in dataframe.columns or "do_predict" not in dataframe.columns:
             return dataframe
 
@@ -169,7 +172,7 @@ class GTQuantMultiTF(IStrategy):
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """Exit when the model flips against the position."""
-        prediction = "&-s-future_return_5m"
+        prediction = self.prediction_col
         if prediction not in dataframe.columns or "do_predict" not in dataframe.columns:
             return dataframe
 
