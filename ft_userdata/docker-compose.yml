@@ -1,0 +1,30 @@
+---
+# GT-Quant Freqtrade service.
+# Infrastructure (TimescaleDB gtquant-db, Redis gtquant-redis, Grafana
+# gtquant-grafana) is managed by the ROOT docker-compose.yml and is already
+# running. This file adds only the trading engine.
+#
+# Reach infra from inside this container via host.docker.internal:
+#   TimescaleDB: host.docker.internal:5432 (gtquant / gtquant_local)
+#   Redis:       host.docker.internal:6379
+version: "3.8"
+
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable_freqai
+    container_name: gtquant-freqtrade
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    # Default command runs the bot in dry-run; overridden for downloads/backtests:
+    #   docker-compose run --rm freqtrade download-data ...
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.dryrun.sqlite
+      --config /freqtrade/user_data/config.json
+      --strategy GTQuantMultiTF

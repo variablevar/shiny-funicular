@@ -1,0 +1,31 @@
+# GT-Quant venv — scripts, collectors, and tests.
+# NOTE: model training/backtesting runs inside the FreqAI Docker image
+# (freqtradeorg/freqtrade:stable_freqai); heavy ML deps are NOT needed here.
+
+# Core
+pandas>=2.1.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+polars>=0.20.0
+
+# Data & API
+requests>=2.31.0
+websocket-client>=1.7.0
+ccxt>=4.2.0
+cryptofeed>=2.4.0
+
+# Database
+psycopg2-binary>=2.9.9
+SQLAlchemy>=2.0.0
+redis>=5.0.0
+
+# ML (regime classifier in core/ only; FreqAI models run in Docker)
+scikit-learn>=1.3.0
+
+# Config & Utils
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+loguru>=0.7.0
+
+# Testing
+pytest>=7.4.0
