@@ -1,0 +1,22 @@
+{
+    "strategy_name": "GTQuantMultiTF",
+    "params": {
+        "buy": {
+            "entry_threshold": 0.0047
+        },
+        "sell": {
+            "exit_threshold": -0.00425
+        },
+        "roi": {
+            "0": 0.205,
+            "34": 0.055,
+            "94": 0.024,
+            "110": 0
+        },
+        "stoploss": {
+            "stoploss": -0.218
+        }
+    },
+    "ft_strat_param_v": 1,
+    "export_time": "2026-08-26T12:30:00+00:00"
+}
