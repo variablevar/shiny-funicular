@@ -31,3 +31,4 @@ data/*.parquet
 # LLM training cache
 unsloth_compiled_cache/
 models/
+data/processed/
