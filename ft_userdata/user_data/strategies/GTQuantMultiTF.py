@@ -306,6 +306,131 @@ class GTQuantMultiTF(IStrategy):
             return proposed_stake
 
     # ------------------------------------------------------------------ #
+    # 1m microstructure entry filter (Day 6)
+    # ------------------------------------------------------------------ #
+
+    use_micro_filter = True
+    micro_max_spread = 0.0005      # 0.05% top-of-book spread
+    micro_vol_delta_sigma = 2.0    # reject if latest 1m volume delta < -2σ
+
+    # Strategy pair -> TimescaleDB symbol
+    _PAIR_TO_DB = {"BTC/USDT:USDT": "BTCUSDT", "ETH/USDT:USDT": "ETHUSDT"}
+
+    def _latest_1m_micro(self, pair: str, lookback_bars: int = 60):
+        """
+        Fetch recent 1m microstructure bars from TimescaleDB.
+        Returns (latest_spread, latest_volume_delta, vol_delta_std) or None.
+        """
+        symbol = self._PAIR_TO_DB.get(pair)
+        if symbol is None:
+            return None
+        try:
+            import psycopg2
+            conn = psycopg2.connect(
+                dbname="gtquant", user="gtquant", password="gtquant_local",
+                host="host.docker.internal", port=5432, connect_timeout=3,
+            )
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT spread, volume_delta FROM ohlcv_1m
+                        WHERE symbol = %s AND spread IS NOT NULL
+                        ORDER BY time DESC LIMIT %s
+                        """,
+                        (symbol, lookback_bars),
+                    )
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            return None
+        if not rows:
+            return None
+        spreads = [r[0] for r in rows]
+        deltas = [r[1] for r in rows if r[1] is not None]
+        import numpy as np
+        vd_std = float(np.std(deltas)) if len(deltas) > 5 else None
+        return rows[0][0], rows[0][1], vd_std
+
+    def confirm_trade_entry(self, pair: str, order_type: str, amount: float,
+                            rate: float, time_in_force: str, current_time,
+                            entry_tag, side: str, **kwargs) -> bool:
+        """
+        1m microstructure gate (live/dry-run only — in backtests the DB holds
+        *live* data, so applying it there would be lookahead).
+
+        Reject entry when:
+          - latest 1m spread > 0.05% (poor execution), or
+          - latest 1m volume delta < -2σ of recent deltas (sell-pressure spike)
+        Freqtrade retries on the next candle, which gives the 1-2 candle
+        delay the plan calls for. Fails open when no micro data is available.
+        """
+        if not self.use_micro_filter:
+            return True
+        # Only gate live/dry-run; never backtest/hyperopt.
+        if getattr(self.dp, "runmode", None) not in ("live", "dry_run"):
+            return True
+
+        micro = self._latest_1m_micro(pair)
+        if micro is None:
+            return True  # fail open = safe (plan Day 12)
+        spread, volume_delta, vd_std = micro
+
+        if spread is not None and spread > self.micro_max_spread:
+            logger.info(f"[micro-filter] {pair} rejected: spread {spread:.5f} > {self.micro_max_spread}")
+            self._audit(pair, current_time, side, "rejected_spread", rate)
+            return False
+        if volume_delta is not None and vd_std and volume_delta < -self.micro_vol_delta_sigma * vd_std:
+            logger.info(f"[micro-filter] {pair} rejected: volume_delta {volume_delta:.1f} < -{self.micro_vol_delta_sigma}σ")
+            self._audit(pair, current_time, side, "rejected_volume_delta", rate, spread, volume_delta)
+            return False
+        self._audit(pair, current_time, side, "approved", rate, spread, volume_delta)
+        return True
+
+    # ------------------------------------------------------------------ #
+    # Audit logging to TimescaleDB (Day 6)
+    # ------------------------------------------------------------------ #
+
+    def _audit(self, pair: str, ts, side: str, decision: str, price: float,
+               spread=None, volume_delta: float = None) -> None:
+        """Write one decision row to audit_log. Live/dry-run only."""
+        if getattr(self.dp, "runmode", None) not in ("live", "dry_run"):
+            return
+        symbol = self._PAIR_TO_DB.get(pair)
+        if symbol is None:
+            return
+        try:
+            import psycopg2
+            conn = psycopg2.connect(
+                dbname="gtquant", user="gtquant", password="gtquant_local",
+                host="host.docker.internal", port=5432, connect_timeout=3,
+            )
+            try:
+                regime = None
+                try:
+                    df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+                    regime = str(df["regime"].iloc[-1])
+                except Exception:
+                    pass
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO audit_log
+                            (time, pair, timeframe, signal_type, regime,
+                             spread_1m, volume_delta_1m, risk_decision, fill_price)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (ts, symbol, self.timeframe, f"entry_{side}", regime,
+                         spread, volume_delta, decision, price),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"audit write failed (non-fatal): {e}")
+
+    # ------------------------------------------------------------------ #
     # FreqAI feature engineering
     # ------------------------------------------------------------------ #
 

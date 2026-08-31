@@ -11,7 +11,8 @@ version: "3.8"
 
 services:
   freqtrade:
-    image: freqtradeorg/freqtrade:stable_freqai
+    build: .
+    image: gtquant-freqai:latest
     container_name: gtquant-freqtrade
     restart: unless-stopped
     ports:
