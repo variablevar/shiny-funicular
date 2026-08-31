@@ -40,6 +40,28 @@ class GTQuantMultiTF(IStrategy):
 
     can_short = True
 
+    # Circuit breakers (Day 5). In modern Freqtrade these live on the
+    # strategy, not in config.
+    @property
+    def protections(self):
+        return [
+            {"method": "CooldownPeriod", "stop_duration_candles": 6},
+            {
+                "method": "StoplossGuard",
+                "lookback_period_candles": 48,
+                "trade_limit": 4,
+                "stop_duration_candles": 24,
+                "only_per_pair": False,
+            },
+            {
+                "method": "MaxDrawdown",
+                "lookback_period_candles": 48,
+                "trade_limit": 10,
+                "stop_duration_candles": 48,
+                "max_allowed_drawdown": 0.15,
+            },
+        ]
+
     # Entry/exit thresholds on the model's predicted return (hyperopt-tuned).
     entry_threshold = DecimalParameter(0.0001, 0.005, default=0.0005, decimals=6,
                                        space="buy", optimize=True, load=True)
@@ -253,6 +275,35 @@ class GTQuantMultiTF(IStrategy):
             ["exit_short", "exit_tag"],
         ] = (1, "model_flip_up")
         return dataframe
+
+    # ------------------------------------------------------------------ #
+    # Regime-aware position sizing (Day 5)
+    # ------------------------------------------------------------------ #
+
+    # Size multiplier per regime. RANGE/HIGH_VOL are blocked at entry, so
+    # these only affect the regimes that trade.
+    regime_size_mult = {
+        "STRONG_BULL": 1.5,
+        "STRONG_BEAR": 1.5,
+        "BULL": 1.0,
+        "BEAR": 1.0,
+    }
+
+    def custom_stake_amount(self, pair: str, current_time, current_rate: float,
+                            proposed_stake: float, min_stake, max_stake,
+                            leverage: float, entry_tag, side: str, **kwargs) -> float:
+        """
+        Scale stake by the current regime: size up in strong trends, base size
+        otherwise. Falls back to proposed_stake if the regime can't be read.
+        """
+        try:
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            regime = df["regime"].iloc[-1]
+            mult = self.regime_size_mult.get(str(regime), 1.0)
+            stake = proposed_stake * mult
+            return max(min_stake, min(stake, max_stake))
+        except Exception:
+            return proposed_stake
 
     # ------------------------------------------------------------------ #
     # FreqAI feature engineering
