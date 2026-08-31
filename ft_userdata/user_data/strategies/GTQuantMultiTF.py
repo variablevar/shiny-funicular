@@ -134,6 +134,9 @@ class GTQuantMultiTF(IStrategy):
         for span in (1, 5, 10, 20):
             dataframe[f"ret_{span}"] = dataframe["close"].pct_change(span)
 
+        # Regime classification from 1h informative features (Day 5).
+        dataframe["regime"] = self._compute_regime(dataframe)
+
         # FreqAI hook (REQUIRED): runs feature engineering across all
         # include_timeframes, trains per sliding window in backtests, and
         # appends prediction columns (&-*, do_predict, DI_values).
@@ -142,29 +145,93 @@ class GTQuantMultiTF(IStrategy):
         return dataframe
 
     # ------------------------------------------------------------------ #
+    # Regime classification (Day 5)
+    # ------------------------------------------------------------------ #
+
+    # Regimes in which entries are blocked entirely.
+    BLOCKED_REGIMES = ("RANGE", "HIGH_VOL")
+    use_regime_gating = True
+
+    # Calibrated on BTC 1h (July 2026): ADX<20 = chop (28% of bars);
+    # |slope| 75th pct = 0.0028. ADX is the chop detector, slope the compass.
+    regime_adx_range_max = 20.0     # ADX below this = RANGE (no trend)
+    regime_adx_trend_min = 25.0     # ADX above this = trending
+    regime_slope_strong = 0.0028    # |1h EMA-50 slope| for STRONG_*
+    regime_vol_mult = 1.5           # HIGH_VOL when rv > mult * rolling median
+
+    def _compute_regime(self, dataframe: DataFrame) -> "pd.Series":
+        """
+        Rule-based regime from 1h informative features + 5m realized vol.
+
+            HIGH_VOL    : 5m realized vol > 1.5x rolling median (overrides all)
+            RANGE       : 1h ADX < 20 (no trend -> chop)
+            STRONG_BULL : 1h slope > +0.0028 AND ADX > 25
+            STRONG_BEAR : 1h slope < -0.0028 AND ADX > 25
+            BULL        : 1h slope > 0
+            BEAR        : 1h slope < 0
+        """
+        import pandas as pd
+
+        slope = dataframe["ema_50_slope_1h"]
+        adx = dataframe["adx_1h"]
+        # 1h of 5m bars realized vol, vs its ~1-day rolling median.
+        rv = dataframe["close"].pct_change().rolling(12).std()
+        rv_med = rv.rolling(288).median()
+
+        regime = pd.Series("RANGE", index=dataframe.index, dtype=object)
+        trending = adx >= self.regime_adx_trend_min
+        strong_bull = (slope > self.regime_slope_strong) & trending
+        strong_bear = (slope < -self.regime_slope_strong) & trending
+        bull = (slope > 0) & ~strong_bull
+        bear = (slope < 0) & ~strong_bear
+
+        # Order matters: direction first, then strong-trend upgrade,
+        # then chop override, then high-vol override.
+        regime[bull] = "BULL"
+        regime[bear] = "BEAR"
+        regime[strong_bull] = "STRONG_BULL"
+        regime[strong_bear] = "STRONG_BEAR"
+        regime[adx < self.regime_adx_range_max] = "RANGE"
+        regime[rv > rv_med * self.regime_vol_mult] = "HIGH_VOL"
+        return regime
+
+    # ------------------------------------------------------------------ #
     # Entry / exit logic (model-driven with regime filter)
     # ------------------------------------------------------------------ #
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Enter when FreqAI is confident (do_predict == 1) and the predicted
-        return clears the threshold. 1h trend gates shorts/longs.
+        Enter when FreqAI is confident (do_predict == 1), the predicted return
+        clears the threshold, and the regime allows the direction (Day 5):
+        RANGE/HIGH_VOL are blocked entirely, longs need a bull regime, shorts
+        need a bear regime.
         """
         prediction = self.prediction_col
         if prediction not in dataframe.columns or "do_predict" not in dataframe.columns:
             return dataframe
+
+        if self.use_regime_gating and "regime" in dataframe.columns:
+            blocked = dataframe["regime"].isin(self.BLOCKED_REGIMES)
+            long_regime_ok = dataframe["regime"].isin(["STRONG_BULL", "BULL"])
+            short_regime_ok = dataframe["regime"] == "BEAR"
+        else:
+            blocked = dataframe["close"] != dataframe["close"]  # all False
+            long_regime_ok = ~blocked
+            short_regime_ok = ~blocked
 
         long_cond = [
             dataframe["do_predict"] == 1,
             dataframe[prediction] > self.entry_threshold.value,
             dataframe["ema_50_slope_1h"] > 0,       # 1h trend up
             dataframe["volume_zscore"] > -1.0,      # avoid dead bars
+            long_regime_ok,
         ]
         short_cond = [
             dataframe["do_predict"] == 1,
             dataframe[prediction] < -self.entry_threshold.value,
             dataframe["ema_50_slope_1h"] < 0,       # 1h trend down
             dataframe["volume_zscore"] > -1.0,
+            short_regime_ok,
         ]
 
         dataframe.loc[reduce(lambda x, y: x & y, long_cond), ["enter_long", "enter_tag"]] = (1, "freqai_long")
