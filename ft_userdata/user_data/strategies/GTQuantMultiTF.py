@@ -306,6 +306,88 @@ class GTQuantMultiTF(IStrategy):
             return proposed_stake
 
     # ------------------------------------------------------------------ #
+    # Shadow mode (Day 11): LLM logs recommendations alongside quant,
+    # WITHOUT overriding. Writes agreement to shadow_log for later analysis.
+    # ------------------------------------------------------------------ #
+
+    shadow_mode = True
+    llm_service_url = "http://host.docker.internal:8000/llm/analyze"
+
+    def _build_tf_context(self, pair: str) -> str | None:
+        """Format the current analyzed row into the LLM's TF-context text."""
+        try:
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            r = df.iloc[-1]
+            if "regime" not in df.columns:
+                return None
+            return (
+                f"5m: RSI={r.get('rsi_14', 50):.0f}, MACD_hist={r.get('macd_hist', 0):+.1f}, "
+                f"ATR={r.get('atr_14', 0) / max(r.get('close', 1), 1) * 100:.2f}%\n"
+                f"1h: EMA50_slope={r.get('ema_50_slope_1h', 0) * 100:+.3f}%, "
+                f"ADX={r.get('adx_1h', 0):.0f}, regime={r.get('regime', 'UNKNOWN')}\n"
+                f"4h: structure={'bullish' if r.get('bull_structure_4h', 0) else 'bearish'}"
+            )
+        except Exception:
+            return None
+
+    def _log_shadow(self, pair: str, ts, quant_dir: int, llm_decision: dict) -> None:
+        """Append one quant-vs-LLM comparison row to shadow_log."""
+        symbol = self._PAIR_TO_DB.get(pair)
+        if symbol is None:
+            return
+        try:
+            import psycopg2
+            import json as _json
+            llm_bias = str(llm_decision.get("bias", "flat")).lower()
+            llm_dir = {"long": 1, "short": -1}.get(llm_bias, 0)
+            agreement = (llm_dir == quant_dir) if quant_dir != 0 else (llm_dir == 0)
+            conn = psycopg2.connect(
+                dbname="gtquant", user="gtquant", password="gtquant_local",
+                host="host.docker.internal", port=5432, connect_timeout=3)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO shadow_log
+                            (time, pair, quant_signal, llm_recommendation, agreement, llm_confidence)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (ts, symbol, str(quant_dir), _json.dumps(llm_decision),
+                         agreement, float(llm_decision.get("confidence", 0.0))),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"shadow log write failed (non-fatal): {e}")
+
+    def bot_loop_start(self, current_time, **kwargs) -> None:
+        """
+        Shadow mode: at each 5m close, query the LLM with the current TF
+        context and log quant-vs-LLM agreement. Does NOT change any decision.
+        Live/dry-run only.
+        """
+        if not self.shadow_mode:
+            return
+        if getattr(self.dp, "runmode", None) not in ("live", "dry_run"):
+            return
+        try:
+            import requests
+            for pair in self.dp.current_whitelist():
+                ctx = self._build_tf_context(pair)
+                if ctx is None:
+                    continue
+                # Current quant signal direction from the analyzed dataframe.
+                df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+                last = df.iloc[-1]
+                quant_dir = int(last.get("enter_long", 0)) - int(last.get("enter_short", 0))
+                resp = requests.post(self.llm_service_url,
+                                     json={"pair": pair, "tf_context": ctx}, timeout=4)
+                self._log_shadow(pair, current_time, quant_dir, resp.json())
+        except Exception as e:
+            logger.debug(f"shadow mode error (non-fatal): {e}")
+
+    # ------------------------------------------------------------------ #
     # 1m microstructure entry filter (Day 6)
     # ------------------------------------------------------------------ #
 
