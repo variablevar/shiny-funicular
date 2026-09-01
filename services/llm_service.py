@@ -31,7 +31,7 @@ from loguru import logger
 
 # Model server: Ollama here, vLLM on production (same OpenAI-style generate).
 MODEL_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "gtquant-7b-v0.1"
+MODEL_NAME = "gtquant-7b-v0.2"
 TIMEOUT_S = 3.0           # plan: timeout handling, fallback after 3s
 SYSTEM = ("You are GT-Quant, a crypto trading analyst. Analyze the multi-timeframe "
           "context and output a JSON decision. Consider: 1m for execution timing, 5m "
