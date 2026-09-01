@@ -181,9 +181,18 @@ def ground_truth(ctx: TFContext, ts: pd.Timestamp, funding: float | None,
     regime = regime_label(r1h["ema_50_slope"], r1h["adx"])
 
     # Bias from the dominant horizon move (ground truth = what happened).
-    if ret_4h > 0.01 or (ret_1h > 0.005 and ret_4h > 0):
+    # Regime-aware threshold: in STRONG_* regimes trends consolidate, so a
+    # smaller realized move still counts as directional continuation. In
+    # weaker regimes we demand a decisive move. (Fixes the strong_trend
+    # labeler that over-labeled flat in Day 8 v1.)
+    if regime in ("STRONG_BULL", "STRONG_BEAR"):
+        dir_thresh_4h, dir_thresh_1h = 0.004, 0.002
+    else:
+        dir_thresh_4h, dir_thresh_1h = 0.01, 0.005
+
+    if ret_4h > dir_thresh_4h or (ret_1h > dir_thresh_1h and ret_4h > 0):
         bias = "long"
-    elif ret_4h < -0.01 or (ret_1h < -0.005 and ret_4h < 0):
+    elif ret_4h < -dir_thresh_4h or (ret_1h < -dir_thresh_1h and ret_4h < 0):
         bias = "short"
     else:
         bias = "flat"
@@ -328,7 +337,7 @@ def main() -> None:
     for name, subset in [("train", examples[:n_train]),
                          ("val", examples[n_train:n_train + n_val]),
                          ("test", examples[n_train + n_val:])]:
-        path = OUT_DIR / f"llm_v2_{name}.jsonl"
+        path = OUT_DIR / f"llm_v02_{name}.jsonl"
         with open(path, "w") as f:
             for ex in subset:
                 f.write(json.dumps(ex) + "\n")

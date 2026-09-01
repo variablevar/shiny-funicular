@@ -2,7 +2,7 @@
 Day 8: GT-Quant 7B fine-tuning with Unsloth (QLoRA, 4-bit NF4).
 
 Trains on the TF-aware dataset from generate_llm_dataset_v2.py
-(data/llm_v2_train.jsonl, val on llm_v2_val.jsonl). Exports LoRA adapter,
+(data/llm_v02_train.jsonl, val on llm_v2_val.jsonl). Exports LoRA adapter,
 merged 16-bit (for vLLM), and GGUF Q4_K_M (for Ollama).
 
 Run on the RTX 4080 (16GB):
@@ -18,9 +18,9 @@ from transformers import TrainingArguments
 # ─── CONFIG ───
 MODEL_NAME = "unsloth/Qwen2.5-7B-Instruct"
 MAX_SEQ_LENGTH = 2048
-TRAIN_PATH = "data/llm_v2_train.jsonl"
-VAL_PATH = "data/llm_v2_val.jsonl"
-OUTPUT_DIR = "models/gtquant-7b-v0.1"
+TRAIN_PATH = "data/llm_v02_train.jsonl"
+VAL_PATH = "data/llm_v02_val.jsonl"
+OUTPUT_DIR = "models/gtquant-7b-v0.2"
 LORA_R = 64
 LORA_ALPHA = 16
 LEARNING_RATE = 2e-4
