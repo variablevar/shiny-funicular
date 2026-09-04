@@ -23,6 +23,9 @@ from pandas import DataFrame
 from technical import qtpylib
 from freqtrade.strategy import DecimalParameter, IStrategy, informative
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 class GTQuantMultiTF(IStrategy):
     INTERFACE_VERSION = 3
@@ -542,6 +545,10 @@ class GTQuantMultiTF(IStrategy):
 
     def feature_engineering_standard(self, dataframe: DataFrame, metadata: dict, **kwargs) -> DataFrame:
         """Standard features (% prefix): computed once on the base 5m frame."""
+        # Only add 5m-specific cross features when ema_9 exists (base timeframe).
+        # On correlated-dataframe passes for 15m/30m/1h/4h these columns are absent.
+        if 'ema_9' not in dataframe.columns:
+            return dataframe
         dataframe["%-ema_9_21_cross"] = (dataframe["ema_9"] - dataframe["ema_21"]) / dataframe["close"]
         dataframe["%-ema_9_50_cross"] = (dataframe["ema_9"] - dataframe["ema_50"]) / dataframe["close"]
         dataframe["%-macd_hist_norm"] = dataframe["macd_hist"] / dataframe["close"]
