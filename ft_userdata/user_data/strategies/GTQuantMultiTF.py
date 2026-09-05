@@ -175,13 +175,15 @@ class GTQuantMultiTF(IStrategy):
 
     # Regimes in which entries are blocked entirely.
     BLOCKED_REGIMES = ("RANGE", "HIGH_VOL")
-    use_regime_gating = True
+    use_regime_gating = True  # set via config if market is ranging
 
     # Calibrated on BTC 1h (July 2026): ADX<20 = chop (28% of bars);
     # |slope| 75th pct = 0.0028. ADX is the chop detector, slope the compass.
-    regime_adx_range_max = 20.0     # ADX below this = RANGE (no trend)
-    regime_adx_trend_min = 25.0     # ADX above this = trending
-    regime_slope_strong = 0.0028    # |1h EMA-50 slope| for STRONG_*
+    # Day 12 fix: relaxed ADX to 15 to allow entries during mild trends (BTC/ETH
+    # were ADX 11-20 in Sept 2026). Block still triggers at <15 ADX.
+    regime_adx_range_max = 15.0     # ADX below this = RANGE (no trend)
+    regime_adx_trend_min = 20.0     # ADX above this = trending
+    regime_slope_strong = 0.0018    # |1h EMA-50 slope| for STRONG_* (relaxed)
     regime_vol_mult = 1.5           # HIGH_VOL when rv > mult * rolling median
 
     def _compute_regime(self, dataframe: DataFrame) -> "pd.Series":
