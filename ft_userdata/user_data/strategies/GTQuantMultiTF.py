@@ -549,6 +549,18 @@ class GTQuantMultiTF(IStrategy):
         # On correlated-dataframe passes for 15m/30m/1h/4h these columns are absent.
         if 'ema_9' not in dataframe.columns:
             return dataframe
+        # BUGFIX (Freqtrade 2026.7): training strips ':' from pair names in %-col
+        # suffixes, but prediction path preserves it. Rename to match training format.
+        pair = metadata.get('pair', '')
+        if ':' in pair:
+            pair_clean = pair.replace(':', '')  # e.g. 'BTC/USDT:USDT' -> 'BTC/USDTUSDT'
+            cols_renamed = {}
+            for col in dataframe.columns:
+                if col.startswith('%') and pair in col:
+                    new_col = col.replace(pair, pair_clean, 1)
+                    cols_renamed[col] = new_col
+            if cols_renamed:
+                dataframe = dataframe.rename(columns=cols_renamed)
         dataframe["%-ema_9_21_cross"] = (dataframe["ema_9"] - dataframe["ema_21"]) / dataframe["close"]
         dataframe["%-ema_9_50_cross"] = (dataframe["ema_9"] - dataframe["ema_50"]) / dataframe["close"]
         dataframe["%-macd_hist_norm"] = dataframe["macd_hist"] / dataframe["close"]
