@@ -32,3 +32,5 @@ data/*.parquet
 unsloth_compiled_cache/
 models/
 data/processed/
+ft_userdata/user_data/tradesv3.dryrun.sqlite-shm
+ft_userdata/user_data/tradesv3.dryrun.sqlite-wal

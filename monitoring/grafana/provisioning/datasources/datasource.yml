@@ -1,0 +1,21 @@
+apiVersion: 1
+
+datasources:
+  # TimescaleDB primary datasource for OHLCV + FreqAI signal data
+  - name: TimescaleDB
+    type: postgres
+    access: proxy
+    url: timescaledb:5432
+    user: gtquant
+    secureJsonData:
+      password: gtquant_local
+    database: gtquant
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 600
+      postgresVersion: 1500
+      timescaledb: true
+    isDefault: true
+    editable: true
