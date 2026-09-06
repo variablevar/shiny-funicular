@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GT-Quant Multi-TF Trade Lens</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0b1426; color: #d8e3f0; margin: 0; padding: 20px;
+    }
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px; padding: 16px 24px;
+      background: #0f1d3a; border: 1px solid #1c2d52; border-radius: 8px;
+    }
+    .header h1 { margin: 0; font-size: 22px; color: #00d3ff; }
+    .header .stats { display: flex; gap: 24px; font-size: 14px; }
+    .header .stats span { color: #8da3c0; }
+    .header .stats strong { color: #fff; font-size: 18px; margin-left: 6px; }
+    .trade-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .trade-card {
+      background: #0f1d3a; border: 1px solid #1c2d52; border-radius: 8px;
+      padding: 12px 16px; cursor: pointer; transition: all 0.15s;
+    }
+    .trade-card:hover { border-color: #00d3ff; transform: translateY(-1px); }
+    .trade-card.active { border-color: #00d3ff; box-shadow: 0 0 0 2px rgba(0,211,255,0.2); }
+    .trade-card .pair { font-size: 14px; font-weight: 600; color: #00d3ff; }
+    .trade-card .meta { font-size: 12px; color: #8da3c0; margin-top: 4px; }
+    .trade-card .pnl { font-size: 16px; font-weight: 700; margin-top: 6px; }
+    .pnl.pos { color: #4ade80; }
+    .pnl.neg { color: #f87171; }
+    .tf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .tf-panel {
+      background: #0f1d3a; border: 1px solid #1c2d52; border-radius: 8px;
+      padding: 16px;
+    }
+    .tf-panel h3 {
+      margin: 0 0 12px 0; font-size: 13px; color: #00d3ff;
+      display: flex; justify-content: space-between;
+    }
+    .tf-panel .candle-count { color: #8da3c0; font-weight: 400; }
+    .candle-table {
+      width: 100%; font-size: 11px; font-family: 'SF Mono', Monaco, monospace;
+      border-collapse: collapse; max-height: 280px; overflow-y: auto; display: block;
+    }
+    .candle-table thead th {
+      position: sticky; top: 0; background: #0a1428;
+      padding: 6px 8px; text-align: right; font-weight: 600;
+      border-bottom: 1px solid #1c2d52; color: #8da3c0;
+    }
+    .candle-table thead th:first-child { text-align: left; }
+    .candle-table tbody tr { border-bottom: 1px solid #1c2d52; }
+    .candle-table tbody tr:hover { background: #0a1530; }
+    .candle-table tbody td {
+      padding: 5px 8px; text-align: right;
+    }
+    .candle-table tbody td:first-child { text-align: left; color: #8da3c0; }
+    .candle-table .ohlc { color: #d8e3f0; }
+    .candle-table .bull { color: #4ade80; }
+    .candle-table .bear { color: #f87171; }
+    .candle-table .vol { color: #8da3c0; font-size: 10px; }
+    .entry-row { background: rgba(0,211,255,0.15) !important; }
+    .entry-row td { border-left: 3px solid #00d3ff; }
+    .exit-row { background: rgba(74,222,128,0.15) !important; }
+    .exit-row td { border-left: 3px solid #4ade80; }
+    .audit-log {
+      margin-top: 16px; background: #0f1d3a; border: 1px solid #1c2d52;
+      border-radius: 8px; padding: 16px;
+    }
+    .audit-log h3 { margin: 0 0 12px 0; font-size: 13px; color: #00d3ff; }
+    .audit-entry {
+      padding: 8px 12px; margin-bottom: 6px;
+      background: #0a1428; border-left: 3px solid #00d3ff;
+      border-radius: 4px; font-size: 12px;
+    }
+    .audit-entry.approved { border-left-color: #4ade80; }
+    .audit-entry.rejected { border-left-color: #f87171; }
+    .audit-entry .ts { color: #8da3c0; font-family: monospace; }
+    .audit-entry .price { color: #fff; font-weight: 600; }
+    .no-trades { text-align: center; padding: 60px; color: #8da3c0; }
+    .error-msg { color: #f87171; padding: 16px; background: #0f1d3a; border: 1px solid #1c2d52; border-radius: 8px; }
+    @media (max-width: 768px) { .tf-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>GT-Quant Multi-TF Trade Lens</h1>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div id="trade-list" class="trade-list"></div>
+  <div id="detail"></div>
+
+  <script>
+    const TRADE_LENS = 'http://localhost:8001';
+    let currentTradeId = null;
+
+    async function loadTrades() {
+      try {
+        const r = await fetch(`${TRADE_LENS}/trades?limit=20`);
+        const data = await r.json();
+        const trades = data.trades || [];
+        document.getElementById('stats').innerHTML = `
+          <span>Trades: <strong>${trades.length}</strong></span>
+          <span>Open: <strong>${trades.filter(t => t.is_open).length}</strong></span>
+          <span>Closed: <strong>${trades.filter(t => !t.is_open).length}</strong></span>
+        `;
+        renderTradeList(trades);
+        if (trades.length > 0) {
+          loadTrade(trades[0].trade_id);
+        } else {
+          document.getElementById('trade-list').innerHTML = '<div class="no-trades">No trades yet — waiting for strategy to fire...</div>';
+        }
+      } catch (e) {
+        document.getElementById('trade-list').innerHTML = `<div class="error-msg">Failed to load trades: ${e}</div>`;
+      }
+    }
+
+    function renderTradeList(trades) {
+      const html = trades.map(t => {
+        const pnl = t.profit_pct || 0;
+        const pnlCls = pnl >= 0 ? 'pos' : 'neg';
+        const isOpen = t.is_open ? ' (OPEN)' : '';
+        return `
+          <div class="trade-card" onclick="loadTrade(${t.trade_id})" id="card-${t.trade_id}">
+            <div class="pair">${t.pair} ${t.is_short ? 'SHORT' : 'LONG'}${isOpen}</div>
+            <div class="meta">Trade #${t.trade_id} · ${t.trade_duration || '?'}min · ${t.enter_tag || ''}</div>
+            <div class="pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}% (${(t.profit_abs || 0).toFixed(2)} USDT)</div>
+          </div>
+        `;
+      }).join('');
+      document.getElementById('trade-list').innerHTML = html;
+    }
+
+    async function loadTrade(tradeId) {
+      currentTradeId = tradeId;
+      document.querySelectorAll('.trade-card').forEach(c => c.classList.remove('active'));
+      const card = document.getElementById(`card-${tradeId}`);
+      if (card) card.classList.add('active');
+
+      try {
+        const r = await fetch(`${TRADE_LENS}/trade/${tradeId}`);
+        const d = await r.json();
+        renderTrade(d);
+      } catch (e) {
+        document.getElementById('detail').innerHTML = `<div class="error-msg">Failed to load trade ${tradeId}: ${e}</div>`;
+      }
+    }
+
+    function renderTrade(d) {
+      const tfs = ['1m', '5m', '15m', '30m', '1h', '4h'];
+      const tfPanels = tfs.map(tf => {
+        const candles = (d.candles[tf] || []);
+        const rows = candles.map(c => {
+          const cls = c.close >= c.open ? 'bull' : 'bear';
+          const arrow = c.close >= c.open ? '↑' : '↓';
+          const isEntry = c.time.startsWith(d.entry.time.substring(0, 16));
+          const isExit = c.time.startsWith(d.exit.time.substring(0, 16));
+          const rowCls = isEntry ? 'entry-row' : isExit ? 'exit-row' : '';
+          const marker = isEntry ? '🎯 ENTRY' : isExit ? '🏁 EXIT' : '';
+          return `
+            <tr class="${rowCls}">
+              <td>${c.time.substring(11, 16)} ${marker}</td>
+              <td class="ohlc ${cls}">${c.open.toFixed(2)}</td>
+              <td class="ohlc">${c.high.toFixed(2)}</td>
+              <td class="ohlc">${c.low.toFixed(2)}</td>
+              <td class="ohlc ${cls}">${c.close.toFixed(2)} ${arrow}</td>
+              <td class="vol">${c.volume.toFixed(0)}</td>
+            </tr>
+          `;
+        }).join('');
+        return `
+          <div class="tf-panel">
+            <h3>${tf} <span class="candle-count">${candles.length} candles</span></h3>
+            ${candles.length === 0
+              ? '<div style="color:#8da3c0;font-size:12px;text-align:center;padding:20px">No candles (need to download more history)</div>'
+              : `<table class="candle-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Vol</th></tr></thead><tbody>${rows}</tbody></table>`
+            }
+          </div>
+        `;
+      }).join('');
+
+      const auditHtml = (d.audit_log || []).map(a => {
+        const cls = a.signal_type && a.signal_type.includes('approved') ? 'approved'
+                    : (a.signal_type && a.signal_type.includes('rejected')) ? 'rejected' : '';
+        return `
+          <div class="audit-entry ${cls}">
+            <span class="ts">${a.time ? new Date(a.time).toLocaleString() : '?'}</span>
+            <strong> ${a.signal_type || '?'}</strong>
+            regime=<code>${a.regime || '?'}</code>
+            price=<span class="price">${a.fill_price ? a.fill_price.toFixed(2) : '?'}</span>
+            decision=<em>${a.risk_decision || '?'}</em>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('detail').innerHTML = `
+        <div class="header" style="margin-bottom:16px">
+          <h1>Trade #${d.trade_id}: ${d.pair} ${d.side}</h1>
+          <div class="stats">
+            <span>Duration: <strong>${d.duration_min}min</strong></span>
+            <span>P&L: <strong style="color:${d.exit.profit_pct >= 0 ? '#4ade80' : '#f87171'}">${d.exit.profit_pct >= 0 ? '+' : ''}${d.exit.profit_pct.toFixed(2)}%</strong></span>
+            <span>Exit: <strong>${d.exit.reason}</strong></span>
+          </div>
+        </div>
+        <div class="tf-grid">${tfPanels}</div>
+        <div class="audit-log">
+          <h3>📋 Audit Log (entry context: spread, regime, microstructure)</h3>
+          ${auditHtml || '<div style="color:#8da3c0">No audit entries</div>'}
+        </div>
+      `;
+    }
+
+    // Auto-refresh every 30s
+    loadTrades();
+    setInterval(loadTrades, 30000);
+  </script>
+</body>
+</html>

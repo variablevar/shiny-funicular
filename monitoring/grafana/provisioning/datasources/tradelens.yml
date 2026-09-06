@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  # TradeLens JSON API datasource for per-trade multi-TF candles
+  - name: TradeLens
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    url: http://host.docker.internal:8001
+    isDefault: false
+    editable: true
+    jsonData:
+      global_queries: []
+      auth_method: none
+      timeout: 30
+      health_check_path: /health
