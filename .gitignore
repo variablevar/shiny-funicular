@@ -34,3 +34,7 @@ models/
 data/processed/
 ft_userdata/user_data/tradesv3.dryrun.sqlite-shm
 ft_userdata/user_data/tradesv3.dryrun.sqlite-wal
+
+# v0.3 LLM training datasets (generated)
+data/llm_v03_*.jsonl
+data/llm_v02_*.jsonl
