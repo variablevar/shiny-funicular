@@ -59,37 +59,6 @@ services:
     volumes:
       - mlflow_data:/mlflow_data
 
-  trade_lens:
-    image: python:3.11-slim
-    container_name: gtquant-trade-lens
-    restart: unless-stopped
-    ports:
-      - "8001:8001"
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./ft_userdata/user_data/data/binance/futures:/app/ft_userdata/user_data/data/binance/futures:ro
-    environment:
-      - FREQTRADE_URL=http://host.docker.internal:8080
-      - DB_HOST=timescaledb
-      - DB_PORT=5432
-      - DB_NAME=gtquant
-      - DB_USER=gtquant
-      - DB_PASS=gtquant_local
-    command: >
-      bash -c "pip install --quiet --no-cache-dir fastapi uvicorn psycopg2-binary pandas requests pydantic loguru pyarrow && uvicorn services.trade_lens:app --host 0.0.0.0 --port 8001"
-    depends_on:
-      - timescaledb
-
-  # Single-page Multi-TF Trade Lens viewer
-  trade_lens_web:
-    image: nginx:alpine
-    container_name: gtquant-trade-lens-web
-    restart: unless-stopped
-    ports:
-      - "8088:80"
-    volumes:
-      - ./monitoring/web:/usr/share/nginx/html:ro
 
 volumes:
   timescale_data:
