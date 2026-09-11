@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import re
 import time
@@ -45,7 +46,7 @@ from loguru import logger
 
 # Deribit public API (no auth needed)
 DERIBIT_BASE = "https://www.deribit.com/api/v2"
-DB_DSN = "host=localhost dbname=gtquant user=gtquant password=gtquant_local"
+DB_DSN = os.getenv("DB_DSN", "host=localhost dbname=gtquant user=gtquant password=gtquant_local")
 
 POLL_INTERVAL = 60            # seconds between snapshots
 RATE_LIMIT_BACKOFF = 10         # seconds if we hit 429

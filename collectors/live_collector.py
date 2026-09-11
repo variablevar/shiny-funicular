@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import time
 from typing import Dict, List, Optional
@@ -40,7 +41,10 @@ from collectors.bar_builder import BarBuilder
 BASE_URL = "https://fapi.binance.com"
 SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 
-DB_DSN = "dbname=gtquant user=gtquant password=gtquant_local host=localhost port=5432"
+DB_DSN = os.getenv(
+    "DB_DSN",
+    "dbname=gtquant user=gtquant password=gtquant_local host=localhost port=5432",
+)
 
 TRADE_POLL_SECONDS = 5      # aggTrades + bookTicker cadence
 SLOW_POLL_SECONDS = 60      # funding + OI cadence

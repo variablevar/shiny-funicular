@@ -59,6 +59,40 @@ services:
     volumes:
       - mlflow_data:/mlflow_data
 
+  # Deribit options collector (no auth, public API)
+  deribit_options:
+    image: python:3.11-slim
+    container_name: gtquant-deribit-options
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=gtquant
+      - DB_USER=gtquant
+      - DB_PASS=gtquant_local
+      - DB_DSN=host=timescaledb dbname=gtquant user=gtquant password=gtquant_local
+    command: >
+      bash -c "pip install --quiet --no-cache-dir requests loguru psycopg2-binary numpy && python collectors/deribit_options.py"
+    depends_on:
+      - timescaledb
+
+  # Binance futures REST collector -> ohlcv_1m microstructure bars
+  live_collector:
+    image: python:3.11-slim
+    container_name: gtquant-live-collector
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      - DB_DSN=host=timescaledb dbname=gtquant user=gtquant password=gtquant_local
+    command: >
+      bash -c "pip install --quiet --no-cache-dir requests loguru psycopg2-binary && python collectors/live_collector.py"
+    depends_on:
+      - timescaledb
 
 volumes:
   timescale_data:
