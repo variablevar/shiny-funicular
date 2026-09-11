@@ -191,9 +191,9 @@ class GTQuantMultiTF(IStrategy):
         Rule-based regime from 1h informative features + 5m realized vol.
 
             HIGH_VOL    : 5m realized vol > 1.5x rolling median (overrides all)
-            RANGE       : 1h ADX < 20 (no trend -> chop)
-            STRONG_BULL : 1h slope > +0.0028 AND ADX > 25
-            STRONG_BEAR : 1h slope < -0.0028 AND ADX > 25
+            RANGE       : 1h ADX < 15 (no trend -> chop)
+            STRONG_BULL : 1h slope > +0.0018 AND ADX >= 20
+            STRONG_BEAR : 1h slope < -0.0018 AND ADX >= 20
             BULL        : 1h slope > 0
             BEAR        : 1h slope < 0
         """
@@ -240,7 +240,7 @@ class GTQuantMultiTF(IStrategy):
         if self.use_regime_gating and "regime" in dataframe.columns:
             blocked = dataframe["regime"].isin(self.BLOCKED_REGIMES)
             long_regime_ok = dataframe["regime"].isin(["STRONG_BULL", "BULL"])
-            short_regime_ok = dataframe["regime"] == "BEAR"
+            short_regime_ok = dataframe["regime"].isin(["STRONG_BEAR", "BEAR"])
         else:
             blocked = dataframe["close"] != dataframe["close"]  # all False
             long_regime_ok = ~blocked
@@ -385,7 +385,10 @@ class GTQuantMultiTF(IStrategy):
                 # Current quant signal direction from the analyzed dataframe.
                 df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
                 last = df.iloc[-1]
-                quant_dir = int(last.get("enter_long", 0)) - int(last.get("enter_short", 0))
+                # enter_long/enter_short are NaN on non-signal candles -> treat as 0.
+                el, es = last.get("enter_long", 0), last.get("enter_short", 0)
+                quant_dir = (0 if el is None or el != el else int(el)) \
+                            - (0 if es is None or es != es else int(es))
                 resp = requests.post(self.llm_service_url,
                                      json={"pair": pair, "tf_context": ctx}, timeout=4)
                 self._log_shadow(pair, current_time, quant_dir, resp.json())
