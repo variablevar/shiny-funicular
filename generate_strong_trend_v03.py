@@ -47,6 +47,28 @@ def ema(s: pd.Series, n: int) -> pd.Series:
     return s.ewm(span=n, adjust=False).mean()
 
 
+def rsi(s: pd.Series, n: int = 14) -> pd.Series:
+    """Wilder's RSI."""
+    delta = s.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return 100 - 100 / (1 + rs)
+
+
+def load_funding(pair: str) -> pd.Series:
+    """Real historical funding rates from the freqtrade funding_rate feather.
+
+    The feather is named '-1h-funding_rate' but rows are the raw 8h funding
+    prints (00:00/08:00/16:00 UTC); the 'open' column carries the rate.
+    """
+    files = list(DATA_DIR.glob(f"{pair}_USDT_USDT-1h-funding_rate.feather"))
+    if not files:
+        return pd.Series(dtype=float)
+    fdf = pd.read_feather(files[0]).set_index("date").sort_index()
+    return fdf["open"].astype(float)
+
+
 def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
     up = df["high"].diff()
     dn = -df["low"].diff()
@@ -98,16 +120,19 @@ def find_consolidation_periods(df: pd.DataFrame) -> pd.DataFrame:
     return df[cond].copy()
 
 
-def build_context(idx, df_1h, df_5m, pair):
+def build_context(idx, df_1h, df_5m, pair, funding_series=None):
     """Build multi-TF context for one consolidation example."""
     # Look up 5m context near the 1h timestamp
     closest_5m = df_5m.index[df_5m.index.get_indexer([idx], method="nearest")[0]]
     row_1h = df_1h.loc[idx]
     row_5m = df_5m.loc[closest_5m]
 
-    # Funding (we don't have it, so use a placeholder based on OI change)
-    # In real data we'd pull from funding_rates table
-    funding = random.uniform(-0.02, 0.02)
+    # Real funding: most recent 8h funding print at or before the timestamp
+    funding = 0.0
+    if funding_series is not None and len(funding_series):
+        loc = funding_series.index.searchsorted(idx, side="right") - 1
+        if loc >= 0:
+            funding = float(funding_series.iloc[loc])
 
     ctx = {
         "pair": pair,
@@ -120,7 +145,7 @@ def build_context(idx, df_1h, df_5m, pair):
         },
         "5m": {
             "close": float(row_5m["close"]),
-            "rsi": 50.0,  # placeholder - we don't compute RSI for individual rows
+            "rsi": float(row_5m["rsi"]),
             "atr_pct": float((row_5m["high"] - row_5m["low"]) / row_5m["close"]),
         },
         "funding_8h": funding,
@@ -147,12 +172,12 @@ def label_consolidation(ctx):
     # Slope must be moderate (consolidation = trend pausing, not reversing)
     slope_mag = abs(slope)
     if adx_v < 15:
-        return "RANGE"
+        return "range"
     if bull_struct and slope > 0.0005:  # Bullish structure intact + positive slope
-        return "STRONG_BULL"
+        return "strong_bull"
     if not bull_struct and slope < -0.0005:
-        return "STRONG_BEAR"
-    return "BULL" if bull_struct else "BEAR"
+        return "strong_bear"
+    return "bull" if bull_struct else "bear"
 
 
 def build_prompt(ctx):
@@ -177,6 +202,13 @@ def build_output(ctx, regime):
     """Build the expected LLM output for the example."""
     bull_struct = ctx["1h"]["structure_bull"]
     bias = "long" if bull_struct else "short"
+    f = ctx["funding_8h"]
+    if f > 0.0005:
+        f_desc = "positive (longs paying shorts)"
+    elif f < -0.0005:
+        f_desc = "negative (shorts paying longs)"
+    else:
+        f_desc = "neutral"
     return {
         "regime": regime,
         "bias": bias,
@@ -187,7 +219,7 @@ def build_output(ctx, regime):
             f"Structure is {'bullish' if bull_struct else 'bearish'} (EMA50 vs EMA200). "
             f"Price is consolidating after a {abs(ctx['1h']['prior_4h_impulse'])*100:.1f}% "
             f"impulse — this is a healthy pullback within an active trend, not a regime change. "
-            f"Funding is {ctx['funding_8h']*100:+.3f}% (neutral). "
+            f"Funding is {f*100:+.3f}% ({f_desc}). "
             f"Classify as {regime}."
         ),
     }
@@ -216,6 +248,15 @@ def generate_examples(target_count=500, seed=42):
             continue
         df_5m = pd.read_feather(files_5m[0]).set_index("date").sort_index()
         df_5m["atr_pct"] = (df_5m["high"] - df_5m["low"]) / df_5m["close"]
+        df_5m["rsi"] = rsi(df_5m["close"], 14)
+
+        # Real historical funding rates (8h prints from Binance via freqtrade)
+        funding = load_funding(pair)
+        if len(funding):
+            logger.info(f"  Funding: {len(funding)} prints "
+                        f"({funding.index[0]} to {funding.index[-1]})")
+        else:
+            logger.warning(f"  No funding data for {pair}; funding defaults to 0.0")
 
         # Find consolidation periods
         consolidation = find_consolidation_periods(df_1h)
@@ -232,7 +273,7 @@ def generate_examples(target_count=500, seed=42):
         )
 
         for idx, row in sampled.iterrows():
-            ctx = build_context(idx, df_1h, df_5m, pair)
+            ctx = build_context(idx, df_1h, df_5m, pair, funding_series=funding)
             regime = label_consolidation(ctx)
             prompt = build_prompt(ctx)
             output = build_output(ctx, regime)
