@@ -37,10 +37,17 @@ ADX_RANGE_MAX = 20.0     # Below = RANGE
 ADX_TREND_MIN = 25.0     # Above = trending
 SLOPE_STRONG = 0.0028    # |1h EMA50 slope| for STRONG_*
 
-# Consolidation detection thresholds
+# Consolidation detection thresholds (strict = original v0.3 mining pass)
 CONSOLIDATION_RANGE_PCT = 0.02     # 2% price range over 1h
 CONSOLIDATION_BARS = 12            # 12 x 5m bars = 1 hour
 PRIOR_IMPULSE_PCT = 0.04           # 4% impulse before consolidation
+
+# Relaxed thresholds for the iteration-2 mining pass (more consolidation
+# coverage: wider range, wider ADX band, smaller prior impulse)
+RELAXED_RANGE_PCT = 0.025
+RELAXED_ADX_LO = 14.0
+RELAXED_ADX_HI = 28.0
+RELAXED_IMPULSE_PCT = 0.03
 
 
 def ema(s: pd.Series, n: int) -> pd.Series:
@@ -103,19 +110,21 @@ def load_pair(pair: str) -> pd.DataFrame:
     return df.dropna()
 
 
-def find_consolidation_periods(df: pd.DataFrame) -> pd.DataFrame:
+def find_consolidation_periods(df: pd.DataFrame, range_pct=CONSOLIDATION_RANGE_PCT,
+                               adx_lo=15.0, adx_hi=25.0,
+                               impulse=PRIOR_IMPULSE_PCT) -> pd.DataFrame:
     """
     Find periods where:
-    - Price is consolidating (range < 2%)
+    - Price is consolidating (range < range_pct)
     - Structure is intact (EMA50 > EMA200 or vice versa)
-    - There was a prior impulse (>4%)
-    - ADX is in transition zone (15-25)
+    - There was a prior impulse (> impulse)
+    - ADX is in the transition zone (adx_lo..adx_hi)
     """
     cond = (
-        (df["range_pct"] < CONSOLIDATION_RANGE_PCT)
-        & (df["adx"] >= 15)
-        & (df["adx"] <= 25)
-        & (df["prior_impulse"].abs() > PRIOR_IMPULSE_PCT)
+        (df["range_pct"] < range_pct)
+        & (df["adx"] >= adx_lo)
+        & (df["adx"] <= adx_hi)
+        & (df["prior_impulse"].abs() > impulse)
     )
     return df[cond].copy()
 
@@ -136,6 +145,7 @@ def build_context(idx, df_1h, df_5m, pair, funding_series=None):
 
     ctx = {
         "pair": pair,
+        "ts": str(idx),  # bar timestamp; enables pair+timestamp dedupe
         "1h": {
             "adx": float(row_1h["adx"]),
             "ema_50_slope": float(row_1h["ema_50_slope"]),
@@ -158,12 +168,12 @@ def label_consolidation(ctx):
     Ground truth for trend-consolidation examples.
 
     Use the structure (EMA50 vs EMA200) and slope direction to label.
-    If structure is bullish + slope positive: STRONG_BULL (the trend will resume)
-    If structure is bearish + slope negative: STRONG_BEAR (the trend will resume)
-    Else: BULL or BEAR (mid-trend, not strong)
+    If structure is bullish + slope positive: strong_bull (the trend will resume)
+    If structure is bearish + slope negative: strong_bear (the trend will resume)
+    Else: bull or bear (mid-trend, not strong)
 
     The KEY insight for v0.3: consolidation after impulse in a strong trend
-    is still STRONG_TREND, not RANGE.
+    is still a strong trend, not range. Labels use the lowercase v02 convention.
     """
     slope = ctx["1h"]["ema_50_slope"]
     adx_v = ctx["1h"]["adx"]
@@ -215,24 +225,33 @@ def build_output(ctx, regime):
         "confidence": 0.75,  # High confidence: consolidation in trend is still a trend
         "risk": "consolidation",
         "reasoning": (
-            f"1h ADX={ctx['1h']['adx']:.1f} with {abs(ctx['1h']['ema_50_slope'])*100:.3f}% slope. "
+            f"1h ADX={ctx['1h']['adx']:.1f} with {abs(ctx['1h']['ema_50_slope'])*100:+.3f}% slope. "
             f"Structure is {'bullish' if bull_struct else 'bearish'} (EMA50 vs EMA200). "
             f"Price is consolidating after a {abs(ctx['1h']['prior_4h_impulse'])*100:.1f}% "
-            f"impulse — this is a healthy pullback within an active trend, not a regime change. "
+            f"impulse — the trend has paused, not reversed; this is a healthy pullback "
+            f"within an active trend, not a regime change, so do not classify as range. "
             f"Funding is {f*100:+.3f}% ({f_desc}). "
-            f"Classify as {regime}."
+            f"Stay with the {'long' if bull_struct else 'short'} bias and wait for a "
+            f"pullback entry rather than chasing. Classify as {regime}."
         ),
     }
 
 
-def generate_examples(target_count=500, seed=42):
-    """Main generation loop."""
+def generate_examples(target_count=500, seed=42, extra_count=400):
+    """Main generation loop.
+
+    Two mining passes per pair:
+      1. strict thresholds + random_state=seed  -> reproduces the original
+         v0.3 sample exactly (deterministic), so those examples keep their
+         identity across regeneration.
+      2. relaxed thresholds (range<2.5%, ADX 14-28, impulse>3%), minus any
+         (pair, timestamp) already mined in pass 1, random_state=seed+1.
+    """
     random.seed(seed)
     np.random.seed(seed)
 
     all_examples = []
     pairs = ["BTC", "ETH"]
-    tfs_needed = ["5m"]  # We need 5m for short-term indicators
 
     for pair in pairs:
         logger.info(f"Processing {pair}...")
@@ -258,19 +277,27 @@ def generate_examples(target_count=500, seed=42):
         else:
             logger.warning(f"  No funding data for {pair}; funding defaults to 0.0")
 
-        # Find consolidation periods
-        consolidation = find_consolidation_periods(df_1h)
-        logger.info(f"  Found {len(consolidation)} consolidation periods")
-
-        if len(consolidation) == 0:
-            continue
-
-        # Sample target_count / 2 from this pair (split between BTC and ETH)
+        # Pass 1: strict thresholds — reproduces the original v0.3 sample
+        strict = find_consolidation_periods(df_1h)
+        logger.info(f"  Found {len(strict)} strict consolidation periods")
         n_per_pair = target_count // len(pairs)
-        sampled = consolidation.sample(
-            n=min(n_per_pair, len(consolidation)),
-            random_state=seed
-        )
+        strict_sample = strict.sample(n=min(n_per_pair, len(strict)),
+                                      random_state=seed) if len(strict) else strict
+
+        # Pass 2: relaxed thresholds, deduped against pass 1 by timestamp
+        relaxed = find_consolidation_periods(
+            df_1h, range_pct=RELAXED_RANGE_PCT,
+            adx_lo=RELAXED_ADX_LO, adx_hi=RELAXED_ADX_HI,
+            impulse=RELAXED_IMPULSE_PCT)
+        relaxed_new = relaxed.drop(index=relaxed.index.intersection(strict_sample.index))
+        logger.info(f"  Relaxed pool: {len(relaxed)} periods, "
+                    f"{len(relaxed_new)} not already mined")
+        n_extra = extra_count // len(pairs)
+        extra_sample = relaxed_new.sample(n=min(n_extra, len(relaxed_new)),
+                                          random_state=seed + 1) if len(relaxed_new) else relaxed_new
+
+        sampled = pd.concat([strict_sample, extra_sample])
+        logger.info(f"  Sampled {len(strict_sample)} strict + {len(extra_sample)} relaxed")
 
         for idx, row in sampled.iterrows():
             ctx = build_context(idx, df_1h, df_5m, pair, funding_series=funding)
@@ -330,14 +357,18 @@ def merge_with_v02(new_examples, train_path, out_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=500,
-                        help="Number of new examples to generate")
+                        help="Number of strict-threshold examples to generate")
+    parser.add_argument("--extra", type=int, default=400,
+                        help="Additional relaxed-threshold examples (iteration 2)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Generating {args.n} trend-consolidation examples...")
-    examples = generate_examples(target_count=args.n, seed=args.seed)
+    logger.info(f"Generating {args.n} strict + {args.extra} relaxed "
+                f"trend-consolidation examples...")
+    examples = generate_examples(target_count=args.n, seed=args.seed,
+                                 extra_count=args.extra)
     logger.info(f"Generated {len(examples)} examples")
 
     # Save raw new examples

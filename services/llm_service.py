@@ -20,6 +20,7 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from typing import Any, Optional
@@ -30,8 +31,8 @@ from pydantic import BaseModel
 from loguru import logger
 
 # Model server: Ollama here, vLLM on production (same OpenAI-style generate).
-MODEL_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "gtquant-7b-v0.2"
+MODEL_URL = os.getenv("MODEL_URL", "http://localhost:11434/api/generate")
+MODEL_NAME = os.getenv("MODEL_NAME", "gtquant-8b-qwen3-v0.1")
 TIMEOUT_S = 3.0           # plan: timeout handling, fallback after 3s
 SYSTEM = ("You are GT-Quant, a crypto trading analyst. Analyze the multi-timeframe "
           "context and output a JSON decision. Consider: 1m for execution timing, 5m "
