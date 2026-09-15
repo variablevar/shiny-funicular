@@ -1,12 +1,14 @@
 # GT-Quant Repository Layout (production)
 
-Multi-timeframe crypto trading system per `GT-QUANT-MASTER-PLAN.md`
-(Multi-Timeframe Edition). Trading engine is Freqtrade+FreqAI in Docker;
+Multi-timeframe crypto trading system per `docs/GT-QUANT-MASTER-PLAN.md`
+(Multi-Timeframe Edition; single-4080 re-scope in `docs/GT-QUANT_Single-4080_Build_Plan.md`,
+v0.2 strategy in `docs/v0.2-strategy.md`, status in `docs/GT-QUANT-STATUS.md`).
+Trading engine is Freqtrade+FreqAI in Docker;
 this repo holds the custom layers on top.
 
 ```
 gt-quant/
-├── GT-QUANT-MASTER-PLAN.md     # The plan (14-day, multi-TF edition)
+├── docs/                       # All plans, status, and day-by-day build docs
 ├── docker-compose.yml          # Infra: TimescaleDB + Redis + Grafana (RUNNING)
 ├── requirements.txt            # venv deps (scripts/collectors/tests only)
 ├── setup.sh                    # Node bootstrap

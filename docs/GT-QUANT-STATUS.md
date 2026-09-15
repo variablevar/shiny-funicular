@@ -1,6 +1,6 @@
 # GT-QUANT — Status vs. Single-4080 Build Plan
 
-**As of 2026-09-15.** Checked against `GT-QUANT_Single-4080_Build_Plan.md`.
+**As of 2026-09-15.** Checked against `docs/GT-QUANT_Single-4080_Build_Plan.md`.
 Legend: ✅ done & verified · 🟡 partial / in progress · ❌ not done · ⚠️ done but not effective
 
 ---
