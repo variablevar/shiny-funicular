@@ -110,7 +110,8 @@ def latest_models(identifier_dir: Path) -> list[tuple[str, Path, Path]]:
     return out
 
 
-def analyze_identifier(identifier: str, mlflow: MLflowREST, exp_id: str) -> pd.DataFrame:
+def analyze_identifier(identifier: str, mlflow: MLflowREST, exp_id: str,
+                       tag: str = "day3-baseline") -> pd.DataFrame:
     id_dir = MODELS_ROOT / identifier
     if not id_dir.exists():
         print(f"  {identifier}: no models found, skipping")
@@ -161,7 +162,7 @@ def analyze_identifier(identifier: str, mlflow: MLflowREST, exp_id: str) -> pd.D
         for i, (_, row) in enumerate(top.head(10).iterrows(), 1):
             mlflow.log_param(run_id, f"top_feature_{i}", row["feature"])
             mlflow.log_metric(run_id, f"top_gain_{i}", row["gain_norm"])
-        mlflow.set_tag(run_id, "stage", "day3-baseline")
+        mlflow.set_tag(run_id, "stage", tag)
         print(f"  -> logged to MLflow run {run_id[:8]}…")
 
         imp.to_csv(MODELS_ROOT / identifier / f"feature_importance_{pair}.csv", index=False)
@@ -170,12 +171,22 @@ def analyze_identifier(identifier: str, mlflow: MLflowREST, exp_id: str) -> pd.D
 
 
 def main() -> None:
+    # Identifiers may be passed on the CLI (default: the Day-3 trio), e.g.
+    #   python analysis/analyze_models.py gtquant-v0.2-5m-micro --tag day14-micro
+    import sys
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    tag = "day3-baseline"
+    if "--tag" in sys.argv:
+        tag = sys.argv[sys.argv.index("--tag") + 1]
+    identifiers = args or [
+        "gtquant-v0.1-5m-primary", "gtquant-v0.1-15m-target", "gtquant-v0.1-1h-target"]
+
     mlflow = MLflowREST(MLFLOW_URI)
     exp_id = mlflow.get_or_create_experiment(EXPERIMENT)
     print(f"MLflow experiment '{EXPERIMENT}' id={exp_id}")
 
-    for identifier in ["gtquant-v0.1-5m-primary", "gtquant-v0.1-15m-target", "gtquant-v0.1-1h-target"]:
-        analyze_identifier(identifier, mlflow, exp_id)
+    for identifier in identifiers:
+        analyze_identifier(identifier, mlflow, exp_id, tag)
 
     print("\nDone. MLflow UI: http://localhost:5000")
 

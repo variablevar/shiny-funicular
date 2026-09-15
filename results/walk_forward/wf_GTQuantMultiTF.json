@@ -1,29 +1,11 @@
 [
   {
-    "timerange": "20260501-20260601",
-    "total_profit_pct": 0.23,
-    "sharpe": 1.49,
-    "sortino": -100.0,
-    "profit_factor": 2.04,
-    "n_trades": 11,
-    "exceptions": 0
-  },
-  {
-    "timerange": "20260601-20260701",
-    "total_profit_pct": 0.26,
-    "sharpe": 3.01,
-    "sortino": 3.13,
-    "profit_factor": 1.49,
-    "n_trades": 38,
-    "exceptions": 0
-  },
-  {
-    "timerange": "20260701-20260801",
-    "total_profit_pct": -0.73,
-    "sharpe": -5.96,
-    "sortino": -4.78,
-    "profit_factor": 0.51,
-    "n_trades": 58,
+    "timerange": "20260714-20260814",
+    "total_profit_pct": -2.41,
+    "sharpe": -22.06,
+    "sortino": -19.42,
+    "profit_factor": 0.52,
+    "n_trades": 223,
     "exceptions": 0
   }
 ]
