@@ -12,6 +12,12 @@ Usage:
     python analysis/walk_forward.py \
         --strategy GTQuantMultiTF --config user_data/config.json \
         --folds 20260501-20260601 20260601-20260701 20260701-20260801
+
+    # Host runner (when Docker Desktop is unavailable): runs the freqtrade
+    # binary from ../venv-ft instead of docker-compose.
+    python analysis/walk_forward.py --host \
+        --strategy GTQuantV02 --config user_data/config_v02.json \
+        --folds ...
 """
 from __future__ import annotations
 
@@ -22,19 +28,31 @@ import subprocess
 from pathlib import Path
 
 FT_DIR = Path(__file__).parent.parent / "ft_userdata"
+HOST_FREQTRADE = Path(__file__).parent.parent / "venv-ft" / "bin" / "freqtrade"
 
 
-def run_backtest_fold(strategy: str, config: str, timerange: str, freqaimodel: str) -> dict:
+def run_backtest_fold(strategy: str, config: str, timerange: str, freqaimodel: str,
+                      host: bool = False) -> dict:
     """Run one backtest fold inside the FreqAI container; parse key metrics."""
     log_path = FT_DIR / "user_data/logs" / f"wf_{strategy}_{timerange}.log"
-    cmd = [
-        "docker-compose", "run", "--rm", "--no-deps", "freqtrade", "backtesting",
-        "--config", config,
-        "--strategy", strategy,
-        "--freqaimodel", freqaimodel,
-        "--timerange", timerange,
-        "--cache", "none",
-    ]
+    if host:
+        cmd = [
+            str(HOST_FREQTRADE), "backtesting", "--userdir", "user_data",
+            "--config", config,
+            "--strategy", strategy,
+            "--freqaimodel", freqaimodel,
+            "--timerange", timerange,
+            "--cache", "none",
+        ]
+    else:
+        cmd = [
+            "docker-compose", "run", "--rm", "--no-deps", "freqtrade", "backtesting",
+            "--config", config,
+            "--strategy", strategy,
+            "--freqaimodel", freqaimodel,
+            "--timerange", timerange,
+            "--cache", "none",
+        ]
     with open(log_path, "w") as lf:
         subprocess.run(cmd, cwd=FT_DIR, stdout=lf, stderr=subprocess.STDOUT, check=False)
 
@@ -62,12 +80,16 @@ def main() -> None:
     ap.add_argument("--freqaimodel", default="LightGBMRegressor")
     ap.add_argument("--folds", nargs="+", required=True,
                     help="timeranges like 20260501-20260601")
+    ap.add_argument("--host", action="store_true",
+                    help="run ../venv-ft/bin/freqtrade directly instead of "
+                         "docker-compose (for when Docker Desktop is down)")
     args = ap.parse_args()
 
     results = []
     for fold in args.folds:
         print(f"=== fold {fold} ===")
-        m = run_backtest_fold(args.strategy, args.config, fold, args.freqaimodel)
+        m = run_backtest_fold(args.strategy, args.config, fold, args.freqaimodel,
+                              host=args.host)
         results.append(m)
         print(json.dumps(m, indent=2))
 
