@@ -12,7 +12,9 @@ the rest of this suite — see conftest.py). Covered contracts:
     missing artifact falls back to the parent rule-based gate.
   * Maker limit placement: long limit strictly below current price, short
     strictly above; pullback-extreme anchoring; fallback to proposed rate.
-  * Exits: time stop fires at 4h; ATR target at 1.5x ATR(14) of entry.
+  * Exits (hybrid, Day 15): tuned-1h ROI ladder + wide -10.9% catastrophe
+    stop + model-flip primary exit (threshold -0.0037); optional 1.5x ATR
+    target; NO time stop and NO trailing stop.
   * Risk: stake = 5% of NAV; directional inventory cap 15% of NAV blocks.
 """
 import sys
@@ -251,25 +253,54 @@ class TestMakerEntryPrice:
 
 
 # --------------------------------------------------------------------------- #
-# Exits: time stop + ATR target
+# Exits (hybrid): ROI ladder + wide stop + model flip; optional ATR target
 # --------------------------------------------------------------------------- #
 class TestExits:
     def _trade(self, open_ts):
         return types.SimpleNamespace(open_date_utc=open_ts)
 
-    def test_time_stop_fires_at_4h(self, strat):
-        t0 = pd.Timestamp("2026-09-01 00:00", tz="UTC")
-        trade = self._trade(t0)
-        assert strat.custom_exit(PAIR, trade, t0 + timedelta(hours=3, minutes=59),
-                                 100.0, 0.001) is None
-        assert strat.custom_exit(PAIR, trade, t0 + timedelta(hours=4),
-                                 100.0, 0.001) == "time_stop_4h"
+    def test_roi_ladder_matches_tuned_1h(self, strat):
+        """Tuned-1h ROI ladder (GTQuantMultiTF1h.json), NOT the doc's
+        disabled table ({"0": 100.0})."""
+        assert strat.minimal_roi == {"0": 0.108, "39": 0.055, "91": 0.04, "205": 0}
 
-    def test_time_stop_beats_atr_target(self, strat):
+    def test_stoploss_is_wide_catastrophe_stop(self, strat):
+        """-10.9% tuned catastrophe stop, NOT the doc-literal -1.5% trading
+        stop that lost -68.08 USDT in Phase 2."""
+        assert strat.stoploss == pytest.approx(-0.109)
+
+    def test_trailing_fully_disabled(self, strat):
+        """The doc's +1.1%/0.5% trailing cost money in Phase 2 — removed."""
+        assert strat.trailing_stop is False
+        assert not strat.trailing_stop_positive
+        assert strat.trailing_stop_positive_offset == 0.0
+        assert strat.trailing_only_offset_is_reached is False
+
+    def test_exit_threshold_is_tuned_1h(self, strat):
+        """Model-flip exit threshold from GTQuantMultiTF1h.json (-0.0037),
+        not the parent default -0.0005."""
+        assert strat.exit_threshold.value == pytest.approx(-0.0037)
+
+    def test_model_flip_is_primary_exit(self, strat):
+        """Inherited populate_exit_trend fires model_flip_* on the tuned
+        threshold."""
+        df = make_5m([100.0] * 48)
+        df["do_predict"] = 1
+        df[PRED] = -0.004  # below exit_threshold -0.0037 -> exit longs
+        out = strat.populate_exit_trend(df.copy(), {"pair": PAIR})
+        assert out["exit_long"].fillna(0).sum() == 48
+        assert (out["exit_tag"].dropna() == "model_flip_down").all()
+        df[PRED] = -0.003  # inside the band -> no exit
+        out = strat.populate_exit_trend(df.copy(), {"pair": PAIR})
+        assert "exit_long" not in out.columns or out["exit_long"].fillna(0).sum() == 0
+
+    def test_no_time_stop(self, strat):
+        """The 4h time stop is REMOVED: a 10h-old trade below target must
+        not be custom-exited."""
         t0 = pd.Timestamp("2026-09-01 00:00", tz="UTC")
-        strat._entry_atr[PAIR] = 0.002
-        assert strat.custom_exit(PAIR, self._trade(t0), t0 + timedelta(hours=5),
-                                 100.0, 0.01) == "time_stop_4h"
+        strat._entry_atr[PAIR] = 0.002  # target = 0.3%
+        assert strat.custom_exit(PAIR, self._trade(t0), t0 + timedelta(hours=10),
+                                 100.0, 0.001) is None
 
     def test_atr_target(self, strat):
         t0 = pd.Timestamp("2026-09-01 00:00", tz="UTC")
@@ -285,6 +316,14 @@ class TestExits:
         strat._entry_atr[PAIR] = 0.002
         assert strat.custom_exit(PAIR, self._trade(t0), t0 + timedelta(hours=1),
                                  100.0, -0.01) is None
+
+    def test_atr_target_disabled_by_flag(self, strat):
+        """use_atr_target=False (A/B arm) makes custom_exit inert."""
+        strat.use_atr_target = False
+        t0 = pd.Timestamp("2026-09-01 00:00", tz="UTC")
+        strat._entry_atr[PAIR] = 0.002
+        assert strat.custom_exit(PAIR, self._trade(t0), t0 + timedelta(hours=1),
+                                 100.0, 0.05) is None
 
 
 # --------------------------------------------------------------------------- #

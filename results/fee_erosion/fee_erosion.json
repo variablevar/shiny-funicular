@@ -376,5 +376,113 @@
     "net_pnl": -2.25,
     "gross_pnl": 7.18,
     "fee_erosion_pct": 131.4
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 186,
+    "total_fees": 11.03,
+    "net_pnl": -17.77,
+    "gross_pnl": -6.74,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 329,
+    "total_fees": 18.51,
+    "net_pnl": -19.53,
+    "gross_pnl": -1.02,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 329,
+    "total_fees": 18.51,
+    "net_pnl": -17.86,
+    "gross_pnl": 0.65,
+    "fee_erosion_pct": 2834.7
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 112,
+    "total_fees": 6.16,
+    "net_pnl": -10.94,
+    "gross_pnl": -4.78,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 110,
+    "total_fees": 6.06,
+    "net_pnl": -11.52,
+    "gross_pnl": -5.46,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 53,
+    "total_fees": 2.88,
+    "net_pnl": 3.43,
+    "gross_pnl": 6.32,
+    "fee_erosion_pct": 45.6
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 33,
+    "total_fees": 1.81,
+    "net_pnl": 0.17,
+    "gross_pnl": 1.98,
+    "fee_erosion_pct": 91.6
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 23,
+    "total_fees": 1.42,
+    "net_pnl": -12.79,
+    "gross_pnl": -11.37,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 53,
+    "total_fees": 2.88,
+    "net_pnl": 4.3,
+    "gross_pnl": 7.19,
+    "fee_erosion_pct": 40.1
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 34,
+    "total_fees": 1.87,
+    "net_pnl": 1.57,
+    "gross_pnl": 3.44,
+    "fee_erosion_pct": 54.4
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 23,
+    "total_fees": 1.41,
+    "net_pnl": -13.7,
+    "gross_pnl": -12.29,
+    "fee_erosion_pct": null
+  },
+  {
+    "identifier": "gtquant-day14-1h-tune",
+    "strategy": "GTQuantV02",
+    "n_trades": 110,
+    "total_fees": 6.06,
+    "net_pnl": -11.52,
+    "gross_pnl": -5.46,
+    "fee_erosion_pct": null
   }
 ]

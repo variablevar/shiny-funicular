@@ -1,7 +1,20 @@
 """
-GTQuantV02 — v0.2 Phase 2 (docs/v0.2-strategy.md §Layer 2, §Layer 3,
-§Execution Rules, §Phase 2): 1h signal + 5m pullback timing + maker-only
-limit entries, on top of the Phase 1 KMeans regime gate.
+GTQuantV02 — v0.2 Phase 2 entries (docs/v0.2-strategy.md §Layer 2, §Layer 3)
+with HYBRID exits: the doc-literal exit stack was replaced by the tuned-1h
+economics from the positive Phase 2 reference (GTQuantMultiTF1h +
+strategies/GTQuantMultiTF1h.json on the identical window/identifier:
+98 trades, +10.77 USDT, Sharpe 3.27, WR 64.3%).
+
+Why the deviation (Phase 2 data, logs/phase2_v02_atr1h.log, same window and
+identifier, entry mechanics identical): the doc-literal exits lost -31.92
+USDT over 595 trades. Exit-reason anatomy:
+    stop_loss (-1.5% hard stop):  76 exits, -68.08 USDT (100% losers)
+    time_stop_4h:                131 exits, -18.49 USDT (WR 32.8%)
+    model_flip_*:                368 exits, +44.46 USDT (WR ~69%)
+    atr_target (1.5x 1h ATR):     18 exits, +10.66 USDT (100% wins)
+The tight stop was a trading stop, not a catastrophe stop, and the 4h time
+stop clipped trades the model would have exited profitably. The hybrid keeps
+the proven entry chain untouched and swaps the exits for the tuned-1h stack.
 
 Chain (in order, gate first):
     1. Regime gate (inherited from GTQuantRegimeGated): KMeans action on the
@@ -22,14 +35,19 @@ Chain (in order, gate first):
        book). unfilledtimeout entry = 15 minutes (3 x 5m candles) — unfilled
        means no trade. Exits stay market.
 
-Risk (doc §Execution Rules):
-    - hard stoploss -1.5%
-    - time stop 4h (custom_exit)
-    - target 1.5 x ATR(14) of the 1h frame at entry (custom_exit; ATR stored
-      per pair at signal time — one open position per pair makes the pair key
-      unique)
-    - trailing stop once +1.1% in profit, trail 0.5% (trailing_stop_positive)
-    - model-flip exit (populate_exit_trend, inherited) as secondary signal
+Exits (HYBRID — tuned-1h economics, NOT the doc §Exit Rules):
+    - model-flip exit (populate_exit_trend, inherited, exit_threshold
+      -0.0037 from GTQuantMultiTF1h.json) is the PRIMARY exit signal
+    - ROI ladder (tuned): 10.8% immediate, 5.5% after 39m, 4% after 91m,
+      any profit after 205m
+    - wide stoploss -10.9% (tuned): a catastrophe stop, not a trading stop
+    - 1.5 x ATR(14) of the 1h frame at entry (custom_exit). Kept: it lost the
+      single-window A/B by 0.58 USDT but WON the 3-fold walk-forward (mean
+      fold Sharpe 0.84 vs 0.02 without), and WF is the selection criterion.
+    - REMOVED vs the doc: the 4h time stop and the +1.1%/0.5% trailing stop
+      (both cost money in the Phase 2 backtest)
+
+Risk (doc §Execution Rules, unchanged):
     - 5% of NAV per trade (custom_stake_amount)
     - one position per pair, max_open_trades = 2 (config)
     - daily -5% halt (MaxDrawdown protection over 288 x 5m candles)
@@ -58,27 +76,41 @@ logger = logging.getLogger(__name__)
 
 
 class GTQuantV02(GTQuantRegimeGated):
-    """1h direction + 5m pullback-timed maker entries (v0.2 Phase 2)."""
+    """1h direction + 5m pullback-timed maker entries, tuned-1h exits."""
 
     # Layer 2: direction comes only from the 1h-forward-return prediction.
     prediction_col = "&-s-future_return_1h"
 
-    # Tuned entry threshold (Day 14 grid, GTQuantMultiTFTune.json). The exit
-    # threshold stays at the parent default; model-flip is a secondary exit.
-    entry_threshold = DecimalParameter(0.0001, 0.005, default=0.001444, decimals=6,
+    # Bias threshold: tuned-1h 0.00474 (GTQuantMultiTF1h.json) won the Day 15
+    # A/B over the Day 14 5m-tuned 0.001444 on the Phase 2 window
+    # (-10.94 USDT/112 trades vs -17.86/329, Sharpe -2.31 vs -4.63).
+    entry_threshold = DecimalParameter(0.0001, 0.005, default=0.00474, decimals=6,
                                        space="buy", optimize=True, load=True)
 
-    # Exit rules (doc §Execution Rules). ROI table disabled — custom_exit and
-    # trailing drive the exits.
-    minimal_roi = {"0": 100.0}
-    stoploss = -0.015
-    trailing_stop = False
-    trailing_stop_positive = 0.005
-    trailing_stop_positive_offset = 0.011
-    trailing_only_offset_is_reached = True
+    # Model-flip threshold (tuned 1h, GTQuantMultiTF1h.json) — now the PRIMARY
+    # exit, not a secondary signal.
+    exit_threshold = DecimalParameter(-0.005, -0.0001, default=-0.0037, decimals=6,
+                                      space="sell", optimize=True, load=True)
 
-    # Time stop / ATR target.
-    time_stop_hours = 4.0
+    # Hybrid exit economics (tuned 1h, GTQuantMultiTF1h.json): ROI ladder +
+    # wide catastrophe stop. The -10.9% stop is NOT a trading stop — the
+    # doc-literal -1.5% stop was the single biggest loser in Phase 2
+    # (-68.08 USDT over 76 forced exits).
+    minimal_roi = {"0": 0.108, "39": 0.055, "91": 0.04, "205": 0}
+    stoploss = -0.109
+    # Trailing fully disabled (doc's +1.1%/0.5% trailing cost money in
+    # backtest; tuned-1h reference has it off).
+    trailing_stop = False
+    trailing_stop_positive = None
+    trailing_stop_positive_offset = 0.0
+    trailing_only_offset_is_reached = False
+
+    # ATR target (doc §Exit Rules): 1.5 x ATR(14) of the 1h frame at entry.
+    # Day 15 A/B: lost the single window by 0.58 USDT but won the 3-fold
+    # walk-forward (mean fold Sharpe 0.84 vs 0.02 without) -> KEPT (WF is
+    # the selection criterion). The 4h time stop is REMOVED (Phase 2:
+    # -18.49 USDT, WR 32.8%).
+    use_atr_target = True
     atr_target_mult = 1.5
 
     # Pullback definition (Layer 3).
@@ -264,15 +296,15 @@ class GTQuantV02(GTQuantRegimeGated):
             return proposed_rate
 
     # ------------------------------------------------------------------ #
-    # Exits (§Exit Rules): time stop 4h, ATR target; model flip inherited
+    # Exits (hybrid): ROI ladder + wide stop + model flip (primary) are
+    # declarative; custom_exit only implements the optional ATR target.
     # ------------------------------------------------------------------ #
 
     def custom_exit(self, pair: str, trade, current_time,
                     current_rate: float, current_profit: float,
                     **kwargs):
-        held_hours = (current_time - trade.open_date_utc).total_seconds() / 3600.0
-        if held_hours >= self.time_stop_hours:
-            return "time_stop_4h"
+        if not self.use_atr_target:
+            return None
 
         atr_pct = self._entry_atr.get(pair)
         if atr_pct is None:
