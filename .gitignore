@@ -42,3 +42,7 @@ data/llm_v02_*.jsonl
 
 # Raw data caches (regenerable)
 data/raw/
+
+# Dry-run DB journals
+ft_userdata/user_data/*.sqlite-shm
+ft_userdata/user_data/*.sqlite-wal

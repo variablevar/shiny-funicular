@@ -45,6 +45,27 @@ FreqAI produces zero trades or zero predictions.
    `&-` / `do_predict` columns, otherwise `.get(col, 0)` returns a scalar and
    `.loc` assignment raises "cannot use a single bool to index into setitem".
 
+9. **Live-vs-training feature count mismatch (960 vs 969) — container patch is
+   NOT in the image.** `GTQuantMultiTF.feature_engineering_standard` only emits
+   its 9 `%`-features when `ema_9` is present, i.e. only on the live prediction
+   dataframe (FreqAI passes the analyzed df as `prediction_dataframe` in
+   `start_live`). Training (`extract_data_and_train_model`) feeds raw OHLCV
+   frames, so the guard early-returns and models train with 960 features, while
+   vanilla `BaseRegressionModel.predict` calls `dk.find_features()` which
+   overwrites `training_features_list` with the live 969 → every inference
+   raises `Pipeline expected Index(..., length=960) but got Index(..., length=969)`
+   → "Empty candle (OHLCV) data", no predictions, no trades.
+   The 5m bot only works because `BaseRegressionModel.py` was hand-patched
+   *inside its container* on Sep 4 (restores `dk.data["training_features_list"]`
+   after `find_features`); the patch is not in `ft_userdata/Dockerfile`, so any
+   freshly created container (e.g. `freqtrade_1h`, created Sep 17) breaks.
+   Fix for the 1h identifier: `GTQuantMultiTF1h.feature_engineering_standard`
+   is overridden to a no-op (models were trained without those 9 features), and
+   `expiration_hours` 1 → 168 in `config_1h_live.json` (models nulled every
+   hour otherwise). Recreating the 5m container would reintroduce the bug
+   there — bake the patch into the Dockerfile or override
+   `feature_engineering_standard` in the base strategy before ever doing that.
+
 ## Smoke-test recipe (known good)
 
 ```bash

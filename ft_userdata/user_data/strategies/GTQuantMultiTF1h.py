@@ -15,6 +15,15 @@ class GTQuantMultiTF1h(GTQuantMultiTF):
 
     prediction_col = "&-s-future_return_1h"
 
+    def feature_engineering_standard(self, dataframe: DataFrame, metadata: dict, **kwargs) -> DataFrame:
+        # Skip the parent's 9 %-features: they depend on strategy indicators
+        # (ema_9, ...) which exist only on the live prediction dataframe, not on
+        # FreqAI's raw training frames — so live produced 969 columns vs the 960
+        # the pipeline was trained on. The 5m bot masks this with a patched
+        # BaseRegressionModel inside its container; this identifier's models were
+        # trained without these features, so omitting them matches the pipeline.
+        return dataframe
+
     def set_freqai_targets(self, dataframe: DataFrame, metadata: dict, **kwargs) -> DataFrame:
         dataframe["&-s-future_return_1h"] = dataframe["close"].shift(-12) / dataframe["close"] - 1
         return dataframe

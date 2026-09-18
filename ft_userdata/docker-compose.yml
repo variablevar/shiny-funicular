@@ -30,3 +30,45 @@ services:
       --config /freqtrade/user_data/config.json
       --strategy GTQuantMultiTF
       --freqaimodel LightGBMRegressor
+
+  # v0.2 deployment step 1: plain tuned 1h strategy (the only
+  # backtest-positive config: +10.77 USDT, Sharpe 3.27, 64% WR on
+  # 2026-06-14..09-11). Runs alongside the 5m bot with its own DB + API.
+  freqtrade_1h:
+    image: gtquant-freqai:latest
+    container_name: gtquant-freqtrade-1h
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade_1h.log
+      --db-url sqlite:////freqtrade/user_data/trades_1h.dryrun.sqlite
+      --config /freqtrade/user_data/config_1h_live.json
+      --strategy GTQuantMultiTF1h
+      --freqaimodel LightGBMRegressor
+
+  # v0.2 strategy: regime gate -> 1h bias -> 5m pullback -> maker limit.
+  # Own FreqAI identifier (live/backtest identifiers must never share a
+  # model dir - they purge each other's sub-trains via the bind mount).
+  freqtrade_v02:
+    image: gtquant-freqai:latest
+    container_name: gtquant-freqtrade-v02
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade_v02.log
+      --db-url sqlite:////freqtrade/user_data/trades_v02.dryrun.sqlite
+      --config /freqtrade/user_data/config_v02_live.json
+      --strategy GTQuantV02
+      --freqaimodel LightGBMRegressor
