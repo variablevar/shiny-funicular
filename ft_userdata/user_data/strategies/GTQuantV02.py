@@ -5,6 +5,27 @@ economics from the positive Phase 2 reference (GTQuantMultiTF1h +
 strategies/GTQuantMultiTF1h.json on the identical window/identifier:
 98 trades, +10.77 USDT, Sharpe 3.27, WR 64.3%).
 
+Phase 2b short-side asymmetry fix (2026-09-17): decomposition of the hybrid
+run (110 trades, -11.52 USDT) showed longs +0.83 / shorts -12.35, with
+-15.67 of the short bleed from model_flip_up exits opened in KMeans
+BULL/STRONG_BULL regimes — shorts structurally fading an up-trend. Shorts
+in KMeans BEAR were +1.45. Fix: shorts enter ONLY when the KMeans regime on
+the latest closed 1h bar is BEAR (`kmeans_short_regimes`), longs ungated
+(BEAR-regime pullback longs were the best long bucket, +5.28). A/B on the
+same window (dedicated identifier gtquant-phase2b-ab; control arm reproduced
+the baseline to the cent):
+    baseline  (no gate, flip exits on):     110 trades, -11.52 USDT
+    gate      (shorts BEAR-only):            61 trades,  +2.28 USDT
+    noflip    (no short flip, no gate):      98 trades,  -7.68 USDT
+    combo     (gate + no short flip):        61 trades,  +3.05 USDT
+No-flip alone stays negative (shorts ride into the -10.9% catastrophe stop:
+-17.91 USDT over 3 stops) — the gate is the fix; dropping the short flip
+exit only stacks on top of it (the 2 gated BEAR flip-up exits were -0.76).
+The combo (= current defaults) passed the 3-fold walk-forward (folds
+20260614-20260714 / 20260714-20260814 / 20260814-20260911): every fold
+positive (+0.48% / +0.40% / +0.20%), mean fold Sharpe 6.60 vs the pre-fix
+hybrid's -1.37% fold-3 blow-up (mean Sharpe 0.84).
+
 Why the deviation (Phase 2 data, logs/phase2_v02_atr1h.log, same window and
 identifier, entry mechanics identical): the doc-literal exits lost -31.92
 USDT over 595 trades. Exit-reason anatomy:
@@ -37,7 +58,8 @@ Chain (in order, gate first):
 
 Exits (HYBRID — tuned-1h economics, NOT the doc §Exit Rules):
     - model-flip exit (populate_exit_trend, inherited, exit_threshold
-      -0.0037 from GTQuantMultiTF1h.json) is the PRIMARY exit signal
+      -0.0037 from GTQuantMultiTF1h.json) is the PRIMARY exit signal for
+      LONGS; shorts skip model_flip_up (Phase 2b, `short_flip_exit = False`)
     - ROI ladder (tuned): 10.8% immediate, 5.5% after 39m, 4% after 91m,
       any profit after 205m
     - wide stoploss -10.9% (tuned): a catastrophe stop, not a trading stop
@@ -112,6 +134,25 @@ class GTQuantV02(GTQuantRegimeGated):
     # -18.49 USDT, WR 32.8%).
     use_atr_target = True
     atr_target_mult = 1.5
+
+    # Phase 2b short-side asymmetry fix: SHORTS are only allowed when the
+    # KMeans regime on the latest closed 1h bar is BEAR. Decomposition of
+    # the Phase 2b hybrid run (110 trades, -11.52 USDT): longs +0.83,
+    # shorts -12.35, and -15.67 of the short bleed came from model_flip_up
+    # exits in KMeans BULL/STRONG_BULL regimes (shorting into an up-trend);
+    # shorts in KMeans BEAR were +1.45. The KMeans cluster map has no
+    # STRONG_BEAR cluster, so ("BEAR",) is the full bear set. Longs are NOT
+    # gated: BEAR-regime pullback longs were the best long bucket (+5.28).
+    # None disables the gate (A/B arm).
+    kmeans_short_regimes: tuple | None = ("BEAR",)
+
+    # A/B arm flag kept for reproducibility: when True, shorts exit on
+    # model_flip_up (pre-Phase-2b behavior). Phase 2b settled on False —
+    # gated (BEAR-only) shorts that skip the flip exit won the window
+    # (+3.05 vs +2.28 USDT) and every WF fold (mean Sharpe 6.60 vs 6.24).
+    # Without the gate, False is dangerous (shorts ride into the -10.9%
+    # catastrophe stop) — the two changes ship together.
+    short_flip_exit = False
 
     # Pullback definition (Layer 3).
     pullback_candles = 3        # return lookback for the dip
@@ -236,12 +277,23 @@ class GTQuantV02(GTQuantRegimeGated):
         # Gate first: VOLATILE/QUIET/UNKNOWN bars never reach the prediction.
         tradable = dataframe["regime_action_1h"].isin(self.KMEANS_TRADABLE_ACTIONS)
 
+        # Short-side regime gate (Phase 2b): shorts only in a KMeans bear
+        # regime. Fail closed if the regime-name column is missing while the
+        # gate is active (both columns are produced together; a missing one
+        # means the informative frame is broken, not "regime unknown").
+        if self.kmeans_short_regimes is None:
+            short_regime_ok = tradable
+        elif "regime_kmeans_1h" in dataframe.columns:
+            short_regime_ok = dataframe["regime_kmeans_1h"].isin(self.kmeans_short_regimes)
+        else:
+            short_regime_ok = pd.Series(False, index=dataframe.index)
+
         long_bias, short_bias = self._bias_1h(dataframe, prediction)
         long_pullback, short_pullback = self._pullback_masks(dataframe)
 
         long_cond = [tradable, long_bias, long_pullback,
                      dataframe["volume_zscore"] > -1.0]
-        short_cond = [tradable, short_bias, short_pullback,
+        short_cond = [tradable, short_regime_ok, short_bias, short_pullback,
                       dataframe["volume_zscore"] > -1.0]
 
         dataframe.loc[reduce(lambda x, y: x & y, long_cond),
@@ -299,6 +351,14 @@ class GTQuantV02(GTQuantRegimeGated):
     # Exits (hybrid): ROI ladder + wide stop + model flip (primary) are
     # declarative; custom_exit only implements the optional ATR target.
     # ------------------------------------------------------------------ #
+
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe = super().populate_exit_trend(dataframe, metadata)
+        if not self.short_flip_exit and "exit_tag" in dataframe.columns:
+            # A/B arm: shorts ignore model_flip_up (ROI/ATR/stop only).
+            mask = dataframe["exit_tag"] == "model_flip_up"
+            dataframe.loc[mask, ["exit_short", "exit_tag"]] = (0, None)
+        return dataframe
 
     def custom_exit(self, pair: str, trade, current_time,
                     current_rate: float, current_profit: float,

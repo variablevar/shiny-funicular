@@ -10,11 +10,18 @@ the rest of this suite — see conftest.py). Covered contracts:
     (short mirrored); bias without pullback yields no entry.
   * Regime gate stays FIRST: VOLATILE/QUIET block even with bias + pullback;
     missing artifact falls back to the parent rule-based gate.
+  * Short-side regime gate (Phase 2b): shorts enter only when the KMeans
+    regime on the 1h bar is BEAR; BULL/STRONG_BULL block shorts but never
+    longs; a missing regime_kmeans_1h column fails closed for shorts only;
+    kmeans_short_regimes=None disables the gate.
+  * short_flip_exit=False (the Phase 2b default) clears model_flip_up exit
+    signals for shorts while leaving model_flip_down for longs intact;
+    setting it True restores the pre-fix behavior.
   * Maker limit placement: long limit strictly below current price, short
     strictly above; pullback-extreme anchoring; fallback to proposed rate.
   * Exits (hybrid, Day 15): tuned-1h ROI ladder + wide -10.9% catastrophe
-    stop + model-flip primary exit (threshold -0.0037); optional 1.5x ATR
-    target; NO time stop and NO trailing stop.
+    stop + model-flip primary exit for LONGS (threshold -0.0037); optional
+    1.5x ATR target; NO time stop and NO trailing stop.
   * Risk: stake = 5% of NAV; directional inventory cap 15% of NAV blocks.
 """
 import sys
@@ -78,12 +85,14 @@ def make_5m(closes, start="2026-09-01 00:00", vol=1000.0) -> pd.DataFrame:
     })
 
 
-def entry_df(action="TRENDING", n=48, tail="dip", pred_at_55=0.005) -> pd.DataFrame:
+def entry_df(action="TRENDING", n=48, tail="dip", pred_at_55=0.005,
+             kregime="BEAR") -> pd.DataFrame:
     """
     48 x 5m bars (4 hours). Flat price, then a tail 'dip' (long pullback) or
     'rip' (short pullback). The 1h-close bars (minute == 55) carry `pred_at_55`;
     mid-hour bars carry a HUGE counter-prediction that must be ignored by the
-    bias sampler.
+    bias sampler. `kregime` sets the KMeans regime name column used by the
+    Phase 2b short-side gate (default BEAR so shorts are allowed).
     """
     closes = [100.0] * (n - 4)
     closes += [99.6, 99.3, 99.1, 99.0] if tail == "dip" else [100.4, 100.7, 100.9, 101.0]
@@ -95,6 +104,7 @@ def entry_df(action="TRENDING", n=48, tail="dip", pred_at_55=0.005) -> pd.DataFr
     df["atr_14"] = 0.30  # 0.3% of price
     if action is not None:
         df["regime_action_1h"] = action
+        df["regime_kmeans_1h"] = kregime
     return df
 
 
@@ -190,6 +200,74 @@ class TestEntryChain:
         df = entry_df().drop(columns=[PRED, "do_predict"])
         out = strat.populate_entry_trend(df, {"pair": PAIR})
         assert n_entries(out) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Short-side regime gate (Phase 2b asymmetry fix)
+# --------------------------------------------------------------------------- #
+class TestShortRegimeGate:
+    def test_shorts_allowed_in_bear_regime(self, strat):
+        df = strat.populate_entry_trend(
+            entry_df(tail="rip", pred_at_55=-0.005, kregime="BEAR"), {"pair": PAIR})
+        assert df["enter_short"].fillna(0).sum() >= 1
+
+    @pytest.mark.parametrize("kregime", ["BULL", "STRONG_BULL", "RANGE",
+                                         "HIGH_VOL", "UNKNOWN"])
+    def test_shorts_blocked_outside_bear(self, strat, kregime):
+        df = strat.populate_entry_trend(
+            entry_df(tail="rip", pred_at_55=-0.005, kregime=kregime), {"pair": PAIR})
+        assert df["enter_short"].fillna(0).sum() == 0
+
+    @pytest.mark.parametrize("kregime", ["BULL", "STRONG_BULL", "BEAR"])
+    def test_longs_never_blocked_by_short_gate(self, strat, kregime):
+        """The gate is short-only: longs fire in any tradable KMeans regime."""
+        df = strat.populate_entry_trend(
+            entry_df(tail="dip", pred_at_55=0.005, kregime=kregime), {"pair": PAIR})
+        assert df["enter_long"].fillna(0).sum() >= 1
+
+    def test_missing_regime_column_fails_closed_for_shorts(self, strat):
+        """Gate active but regime_kmeans_1h absent -> shorts blocked, longs fine."""
+        df = entry_df(tail="rip", pred_at_55=-0.005).drop(columns=["regime_kmeans_1h"])
+        out = strat.populate_entry_trend(df, {"pair": PAIR})
+        assert out["enter_short"].fillna(0).sum() == 0
+        df = entry_df(tail="dip", pred_at_55=0.005).drop(columns=["regime_kmeans_1h"])
+        out = strat.populate_entry_trend(df, {"pair": PAIR})
+        assert out["enter_long"].fillna(0).sum() >= 1
+
+    def test_gate_disabled_by_none(self, strat):
+        """kmeans_short_regimes=None (A/B arm) restores ungated shorts."""
+        strat.kmeans_short_regimes = None
+        df = strat.populate_entry_trend(
+            entry_df(tail="rip", pred_at_55=-0.005, kregime="STRONG_BULL"),
+            {"pair": PAIR})
+        assert df["enter_short"].fillna(0).sum() >= 1
+
+
+# --------------------------------------------------------------------------- #
+# Short flip-exit (Phase 2b: shorts skip model_flip_up by default)
+# --------------------------------------------------------------------------- #
+class TestShortFlipExit:
+    def _flip_frame(self, pred):
+        df = make_5m([100.0] * 48)
+        df["do_predict"] = 1
+        df[PRED] = pred
+        return df
+
+    def test_default_skips_short_flip_exit(self, strat):
+        """Phase 2b default: shorts ignore model_flip_up; long flips intact."""
+        out = strat.populate_exit_trend(self._flip_frame(0.004), {"pair": PAIR})
+        assert out["exit_short"].fillna(0).sum() == 0
+        assert not (out["exit_tag"].dropna() == "model_flip_up").any()
+        out = strat.populate_exit_trend(self._flip_frame(-0.004), {"pair": PAIR})
+        assert out["exit_long"].fillna(0).sum() == 48
+        assert (out["exit_tag"].dropna() == "model_flip_down").all()
+
+    def test_flip_arm_restores_short_exits(self, strat):
+        """short_flip_exit=True restores the pre-Phase-2b behavior."""
+        strat.short_flip_exit = True
+        out = strat.populate_exit_trend(self._flip_frame(0.004), {"pair": PAIR})
+        assert out["exit_short"].fillna(0).sum() == 48
+        assert (out["exit_tag"].dropna() == "model_flip_up").all()
 
 
 # --------------------------------------------------------------------------- #
